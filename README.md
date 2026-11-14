@@ -101,7 +101,7 @@ TUMI-HEALT contributes to the NASA Space Apps Challenge by providing astronauts 
 ## Installation and Setup
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/ikerchborn/TUMIHEALT-NASA-CHALLENGE.git
 cd TUMI-HEALT
 
 # Set up Python virtual environment (if needed for data processing scripts)
