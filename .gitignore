@@ -1,0 +1,25 @@
+# Dependency directories
+node_modules/
+dist/
+
+# Python virtual environment
+.venv/
+
+# Environment files
+.env
+.env.*
+
+# OS metadata
+Thumbs.db
+.DS_Store
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Data files (large research datasets) – add specific patterns if needed
+# data/raw/**
+
+# Ignore IDE settings (example for VS Code)
+.vscode/
+.idea/
