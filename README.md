@@ -146,6 +146,6 @@ Personal astronaut health records are stored **only** in the browser’s Indexed
 **INITIAL STRUCTURE / DEVELOPMENT IN PROGRESS**
 
 ## License and Acknowledgments
-License: *Pending* – to be added.
+License: GPL-3.0 license
 
 Acknowledgments: NASA and the providers of the OSD‑569, OSD‑575, UTMB Bed‑rest, and STS‑55 datasets.
