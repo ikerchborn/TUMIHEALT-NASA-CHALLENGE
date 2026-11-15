@@ -125,14 +125,25 @@ export function summarizeIndicatorRecords(
   indicator: string,
   records: readonly HealthRecord[],
 ): AnalyticsSummary {
-  const scoped = records
-    .filter(
+  const scoped = records.filter(
       (r) =>
         r.astronaut_id === astronautId &&
         r.category === category &&
         r.indicator === indicator,
-    )
-    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+    );
+  let previousTimestamp = scoped.length > 0 ? Date.parse(scoped[0].timestamp) : 0;
+  for (let index = 1; index < scoped.length; index += 1) {
+    const currentTimestamp = Date.parse(scoped[index].timestamp);
+    if (
+      Number.isNaN(previousTimestamp) ||
+      Number.isNaN(currentTimestamp) ||
+      currentTimestamp < previousTimestamp
+    ) {
+      scoped.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+      break;
+    }
+    previousTimestamp = currentTimestamp;
+  }
 
   const unitCheck = validateUnitConsistency(scoped);
   if (!unitCheck.valid) {

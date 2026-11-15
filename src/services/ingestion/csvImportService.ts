@@ -8,6 +8,7 @@ import type {
   HealthCategory,
   HealthRecordInput,
   ImportBatch,
+  ImportFileFormat,
   ValidationIssue,
 } from '@/types';
 import { recordAuditEvent } from '@/services/audit';
@@ -19,8 +20,29 @@ import {
   validateCsvUploadConstraints,
 } from '@/services/security';
 import { parseCsv } from './csvParser';
+import { getAllowedUnits } from '@/services/validation/unitRegistry';
 
 const MISSING_MARKERS = new Set(['', 'NA', 'N/A', 'NULL', 'NONE', 'NOT_AVAILABLE']);
+
+function countHeaderDelimiter(csvText: string, delimiter: string): number {
+  const header = csvText.replace(/^\uFEFF/, '');
+  let inQuotes = false;
+  let count = 0;
+  for (let index = 0; index < header.length; index += 1) {
+    const char = header[index];
+    const next = header[index + 1];
+    if (char === '"' && inQuotes && next === '"') {
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (!inQuotes && (char === '\r' || char === '\n')) {
+      break;
+    } else if (!inQuotes && char === delimiter) {
+      count += 1;
+    }
+  }
+  return count;
+}
 
 function generateBatchId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -80,7 +102,20 @@ export function inspectCsvFile(
   fileName: string,
   sampleSize = 5,
 ): CsvInspectionResult {
+  if (!csvText.trim()) {
+    throw new Error('The selected file is empty.');
+  }
+  const commaCount = countHeaderDelimiter(csvText, ',');
+  const alternateDelimiter = [';', '\t']
+    .map((delimiter) => ({ delimiter, count: countHeaderDelimiter(csvText, delimiter) }))
+    .sort((a, b) => b.count - a.count)[0];
+  if (alternateDelimiter.count > commaCount) {
+    throw new Error('This CSV uses a delimiter other than a comma. Save it as comma-separated CSV or use a TUMI-HEALT template.');
+  }
   const { headers, rows } = parseCsv(csvText);
+  if (headers.length === 0 || rows.length === 0) {
+    throw new Error('The selected file has headers but no measurement rows.');
+  }
   return {
     file_name: fileName,
     headers,
@@ -97,6 +132,8 @@ export function inspectCsvFile(
 export async function prepareCsvImportPreview(params: {
   csvText: string;
   fileName: string;
+  sourceFileName?: string;
+  fileFormat?: ImportFileFormat;
   profileId: string;
   category: HealthCategory;
   dataOrigin: DataOrigin;
@@ -113,6 +150,7 @@ export async function prepareCsvImportPreview(params: {
     throw new Error(uploadCheck.error);
   }
   const db = await initializeDatabase();
+  const { headers, rows } = parseCsv(params.csvText);
   const normalizedCsv = params.csvText.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').trim();
   const contentHash = await computeSha256Hex(normalizedCsv);
 
@@ -136,17 +174,17 @@ export async function prepareCsvImportPreview(params: {
       category: params.category,
       status: 'failure',
       details: {
-        file_name: params.fileName,
+        file_name: params.sourceFileName ?? params.fileName,
+        file_format: params.fileFormat ?? 'csv',
         content_hash: contentHash,
         duplicate_of_batch_id: duplicateBatch.batch_id,
-        reason: 'Duplicate CSV content detected for this profile and category.',
+        reason: 'Duplicate import content detected for this profile and category.',
       },
     });
     throw new Error(
-      `Duplicate CSV import blocked: identical content was already imported in batch "${duplicateBatch.batch_id}".`,
+      `Duplicate import blocked: this entire file (${rows.length} measurement row${rows.length === 1 ? '' : 's'}) matches an earlier import in batch "${duplicateBatch.batch_id}". Choose a different file or review the existing batch in History.`,
     );
   }
-  const { headers, rows } = parseCsv(params.csvText);
   const batchId = generateBatchId();
   const now = new Date().toISOString();
 
@@ -166,7 +204,8 @@ export async function prepareCsvImportPreview(params: {
       batch_id: batchId,
       profile_id: params.profileId,
       category: params.category,
-      file_name: params.fileName,
+      file_name: params.sourceFileName ?? params.fileName,
+      file_format: params.fileFormat ?? 'csv',
       data_origin: params.dataOrigin,
       source_dataset: params.sourceDataset,
       status: 'failed',
@@ -187,7 +226,8 @@ export async function prepareCsvImportPreview(params: {
       status: 'failure',
       details: {
         batch_id: batchId,
-        file_name: params.fileName,
+        file_name: params.sourceFileName ?? params.fileName,
+        file_format: params.fileFormat ?? 'csv',
         reason: `Missing required mapped columns in CSV headers: ${missingMappingColumns.join(', ')}`,
       },
     });
@@ -300,10 +340,24 @@ export async function prepareCsvImportPreview(params: {
 
     const validation = validateHealthRecordInput(candidate);
     const combinedErrors = [...rowErrors, ...validation.errors];
+    if (!getAllowedUnits(candidate.category, candidate.indicator)) {
+      combinedErrors.push({
+        field: 'indicator',
+        code: 'UNKNOWN_INDICATOR',
+        message: `Indicator "${candidate.indicator}" is not supported for ${candidate.category}. Choose an indicator listed in the import guide.`,
+      });
+    }
+    if (Date.parse(candidate.timestamp) > Date.now()) {
+      combinedErrors.push({
+        field: 'timestamp',
+        code: 'FUTURE_DATE',
+        message: 'Future measurement dates are not accepted.',
+      });
+    }
     const isValid = combinedErrors.length === 0;
 
     const validatedRow: CsvValidatedRow = {
-      row_number: idx + 1,
+      row_number: idx + 2,
       raw,
       record_input: isValid ? candidate : null,
       valid: isValid,
@@ -323,7 +377,8 @@ export async function prepareCsvImportPreview(params: {
     batch_id: batchId,
     profile_id: params.profileId,
     category: params.category,
-    file_name: params.fileName,
+    file_name: params.sourceFileName ?? params.fileName,
+    file_format: params.fileFormat ?? 'csv',
     content_hash: contentHash,
     is_duplicate_of_batch_id: duplicateBatch?.batch_id,
     data_origin: params.dataOrigin,
@@ -347,7 +402,8 @@ export async function prepareCsvImportPreview(params: {
     status: invalidRows.length === 0 ? 'success' : 'warning',
     details: {
       batch_id: batchId,
-      file_name: params.fileName,
+      file_name: params.sourceFileName ?? params.fileName,
+      file_format: params.fileFormat ?? 'csv',
       total_rows: rows.length,
       valid_rows: validRecords.length,
       invalid_rows: invalidRows.length,

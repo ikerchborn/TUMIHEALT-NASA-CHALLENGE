@@ -12,11 +12,14 @@ export type ImportBatchStatus =
   | 'cancelled'
   | 'failed';
 
+export type ImportFileFormat = 'csv' | 'xml' | 'xlsx' | 'xls';
+
 export interface ImportBatch {
   batch_id: string;
   profile_id: string;
   category: HealthCategory;
   file_name: string;
+  file_format?: ImportFileFormat;
   content_hash?: string;
   is_duplicate_of_batch_id?: string;
   data_origin: DataOrigin;

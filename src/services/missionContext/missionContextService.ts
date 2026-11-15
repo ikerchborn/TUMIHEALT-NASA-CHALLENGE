@@ -30,6 +30,7 @@ export async function saveMissionContext(
     mission_phase: input.mission_phase,
     environment_type: input.environment_type.trim() || 'unknown',
     gravity_environment: input.gravity_environment,
+    mission_start_date: input.mission_start_date || undefined,
     activity_context: input.activity_context?.trim() || undefined,
     sleep_context: input.sleep_context?.trim() || undefined,
     measurement_context: input.measurement_context?.trim() || undefined,

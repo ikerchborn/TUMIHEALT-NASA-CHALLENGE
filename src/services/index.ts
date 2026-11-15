@@ -12,3 +12,7 @@ export * from './hazards';
 export * from './assessment';
 export * from './missionContext';
 export * from './security';
+export * from './demo';
+export * from './checkIn';
+export * from './medicalReview';
+export * from './assistant';

@@ -33,6 +33,7 @@ describe('Phase 7-8 Mission Context, Security Hardening, and Backup/Restore', ()
       mission_phase: 'inflight',
       environment_type: 'ISS_analog_module',
       gravity_environment: 'microgravity',
+      mission_start_date: '2026-04-04',
       activity_context: 'resting',
       sleep_context: 'post_sleep',
     });
@@ -40,6 +41,7 @@ describe('Phase 7-8 Mission Context, Security Hardening, and Backup/Restore', ()
     const latest = await getLatestMissionContext('astro-sec-1');
     expect(latest?.mission_id).toBe('ARTEMIS-SIM-01');
     expect(latest?.gravity_environment).toBe('microgravity');
+    expect(latest?.mission_start_date).toBe('2026-04-04');
 
     await deleteLocalProfileData('astro-sec-1');
     expect(await getMissionContexts('astro-sec-1')).toHaveLength(0);

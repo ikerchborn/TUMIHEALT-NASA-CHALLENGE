@@ -13,6 +13,7 @@ import {
   saveSleepMeasurement,
   updateRecord,
 } from '@/services/healthService';
+import { saveDailyCheckIn } from '@/services/checkIn';
 import {
   closeDatabase,
   deleteLocalDatabase,
@@ -119,6 +120,14 @@ describe('IndexedDB Storage, Persistence, Profile Separation, and Audit Trail', 
       sleep_duration: 7.2,
       sleep_efficiency: 91,
     });
+    await saveDailyCheckIn({
+      profile_id: 'astro-01',
+      mood: 'good',
+      energy_level: 4,
+      symptoms: [],
+      data_origin: 'SELF_REPORTED',
+      source: 'daily_check_in',
+    });
 
     const updatedBlood = await updateRecord(blood.id, 'blood', { value: 4.7 });
     expect(updatedBlood.value).toBe(4.7);
@@ -146,7 +155,7 @@ describe('IndexedDB Storage, Persistence, Profile Separation, and Audit Trail', 
 
     const deletionResult = await deleteLocalProfileData('astro-01');
     expect(deletionResult.deletedProfile).toBe(true);
-    expect(deletionResult.deletedRecordsCount).toBe(2);
+    expect(deletionResult.deletedRecordsCount).toBe(3);
 
     const remainingRecords = await getRecords({ astronaut_id: 'astro-01' });
     expect(remainingRecords).toHaveLength(0);

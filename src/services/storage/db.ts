@@ -3,16 +3,18 @@ import type {
   AuditEvent,
   BloodRecord,
   CardiovascularRecord,
+  DailyCheckIn,
   ImportBatch,
   LocalAstronautProfile,
   MissionContext,
+  MedicalReviewRequest,
   ResearchAggregate,
   ResearchDatasetRecord,
   SleepRecord,
 } from '@/types';
 
 export const DATABASE_NAME = 'tumi_healt_local_db';
-export const DATABASE_VERSION = 4;
+export const DATABASE_VERSION = 6;
 
 /**
  * Local IndexedDB database powered by Dexie.js.
@@ -31,9 +33,27 @@ export class TumiHealthDatabase extends Dexie {
   mission_contexts!: EntityTable<MissionContext, 'context_id'>;
   research_records!: EntityTable<ResearchDatasetRecord, 'record_id'>;
   research_aggregates!: EntityTable<ResearchAggregate, 'aggregate_id'>;
+  daily_checkins!: EntityTable<DailyCheckIn, 'id'>;
+  medical_review_requests!: EntityTable<MedicalReviewRequest, 'id'>;
 
   constructor(dbName: string = DATABASE_NAME) {
     super(dbName);
+
+    this.on('versionchange', (event) => {
+      this.close();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('tumi:database-versionchange', {
+            detail: { newVersion: event.newVersion },
+          }),
+        );
+      }
+    });
+    this.on('blocked', () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('tumi:database-blocked'));
+      }
+    });
 
     // Version 1: Initial local profile and category record stores
     this.version(1).stores({
@@ -93,6 +113,50 @@ export class TumiHealthDatabase extends Dexie {
     });
 
     // Version 4: Add separate research_records and research_aggregates stores
+    this.version(4).stores({
+      profiles: 'astronaut_id, display_name, created_at',
+      blood_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      sleep_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      cardiovascular_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      import_batches:
+        'batch_id, profile_id, category, status, created_at, [profile_id+created_at]',
+      audit_events:
+        'event_id, record_id, profile_id, action, timestamp, status, [profile_id+timestamp], [record_id+timestamp]',
+      mission_contexts:
+        'context_id, astronaut_id, mission_id, mission_phase, recorded_at, [astronaut_id+recorded_at]',
+      research_records:
+        'record_id, category, source_dataset, source_subject_id, indicator, study_timepoint, [source_dataset+source_subject_id]',
+      research_aggregates:
+        'aggregate_id, category, source_dataset, indicator, group_label, [source_dataset+indicator]',
+    });
+
+    // Version 5: Add daily self-reported check-ins without changing existing stores.
+    this.version(5).stores({
+      profiles: 'astronaut_id, display_name, created_at',
+      blood_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      sleep_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      cardiovascular_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      import_batches:
+        'batch_id, profile_id, category, status, created_at, [profile_id+created_at]',
+      audit_events:
+        'event_id, record_id, profile_id, action, timestamp, status, [profile_id+timestamp], [record_id+timestamp]',
+      mission_contexts:
+        'context_id, astronaut_id, mission_id, mission_phase, recorded_at, [astronaut_id+recorded_at]',
+      research_records:
+        'record_id, category, source_dataset, source_subject_id, indicator, study_timepoint, [source_dataset+source_subject_id]',
+      research_aggregates:
+        'aggregate_id, category, source_dataset, indicator, group_label, [source_dataset+indicator]',
+      daily_checkins:
+        'id, profile_id, checkin_date, created_at, [profile_id+checkin_date], [profile_id+created_at]',
+    });
+
+    // Version 6: Add local medical review requests without changing existing stores.
     this.version(DATABASE_VERSION).stores({
       profiles: 'astronaut_id, display_name, created_at',
       blood_records:
@@ -111,6 +175,10 @@ export class TumiHealthDatabase extends Dexie {
         'record_id, category, source_dataset, source_subject_id, indicator, study_timepoint, [source_dataset+source_subject_id]',
       research_aggregates:
         'aggregate_id, category, source_dataset, indicator, group_label, [source_dataset+indicator]',
+      daily_checkins:
+        'id, profile_id, checkin_date, created_at, [profile_id+checkin_date], [profile_id+created_at]',
+      medical_review_requests:
+        'id, profile_id, status, created_at, [profile_id+created_at]',
     });
   }
 }

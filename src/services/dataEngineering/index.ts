@@ -5,3 +5,4 @@ export * from './etl/processCmpDataset';
 export * from './etl/processCbcDataset';
 export * from './etl/processApolloDataset';
 export * from './etl/processActigraphyDataset';
+export * from './etl/spreadsheetAdapter';

@@ -1,0 +1,195 @@
+.body-figure {
+  width: 100%;
+}
+
+.body-figure-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.body-figure-svg .layer {
+  opacity: 0.2;
+  transition: opacity 240ms ease;
+}
+
+.body-figure-svg #L-musculo {
+  opacity: 0.12;
+}
+
+.body-figure-svg[data-selected] .layer {
+  opacity: 0.08;
+}
+
+.body-figure-svg[data-selected='sleep'] #L-sleep,
+.body-figure-svg[data-selected='cardiovascular'] #L-heart,
+.body-figure-svg[data-selected='blood'] #L-blood,
+.body-figure-svg[data-selected='bones_muscles'] #L-musculo {
+  opacity: 1;
+  filter: url(#glow);
+}
+
+.body-figure-svg .body-figure-leaders path {
+  stroke: #38bdf8;
+  stroke-opacity: 0.35;
+}
+
+.body-figure-svg .body-figure-leaders path.is-selected {
+  stroke-opacity: 0.95;
+}
+
+.body-figure-svg .body-figure-hotspot {
+  cursor: pointer;
+  outline: none;
+}
+
+.body-figure-svg .body-figure-hotspot .hit-area {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.body-figure-svg .body-figure-hotspot .ring {
+  fill: none;
+  stroke: #22d3ee;
+  stroke-width: 1.5;
+  opacity: 0.6;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: body-figure-pulse 2.4s ease-out infinite;
+}
+
+.body-figure-svg .body-figure-hotspot .dot {
+  fill: #22d3ee;
+}
+
+.body-figure-svg .body-figure-hotspot .focus-ring {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.body-figure-svg .body-figure-hotspot:focus-visible .focus-ring {
+  opacity: 1;
+}
+
+.body-figure-svg .body-figure-label {
+  cursor: pointer;
+  outline: none;
+}
+
+.body-figure-svg .body-figure-label rect {
+  fill: #0b1b2c;
+  stroke: #38bdf8;
+  stroke-opacity: 0.45;
+}
+
+.body-figure-svg .body-figure-label text {
+  fill: #e2e8f0;
+  font: 600 14px system-ui, sans-serif;
+}
+
+.body-figure-svg .body-figure-label .sub {
+  fill: #94a3b8;
+  font: 12px system-ui, sans-serif;
+}
+
+.body-figure-svg .body-figure-label.is-selected rect,
+.body-figure-svg .body-figure-label:focus-visible rect {
+  fill: #0e3a4f;
+  stroke: #22d3ee;
+  stroke-opacity: 1;
+  stroke-width: 2;
+}
+
+.body-figure-svg-calm .layer {
+  opacity: 0.16;
+  transition: none;
+}
+
+.body-figure-svg-calm #L-musculo {
+  opacity: 0.1;
+}
+
+.body-figure-svg-calm [filter='url(#glow)'] {
+  filter: none;
+  stroke-opacity: 0.45;
+}
+
+.body-figure-mobile-labels {
+  display: none;
+}
+
+@keyframes body-figure-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 639px) {
+  .body-figure-svg .body-figure-leaders,
+  .body-figure-svg .body-figure-labels {
+    display: none;
+  }
+
+  .body-figure-mobile-labels {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+
+  .body-figure-mobile-label {
+    display: flex;
+    min-height: 44px;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0.125rem;
+    border: 1px solid rgb(56 189 248 / 0.45);
+    border-radius: 0.625rem;
+    background: #0b1b2c;
+    padding: 0.5rem 0.625rem;
+    color: #e2e8f0;
+    font-size: 14px;
+    line-height: 1.25;
+    text-align: left;
+  }
+
+  .body-figure-mobile-label:focus-visible {
+    outline: 2px solid #67e8f9;
+    outline-offset: 2px;
+  }
+
+  .body-figure-mobile-label.is-selected {
+    border-color: #22d3ee;
+    background: #0e3a4f;
+  }
+
+  .body-figure-mobile-status {
+    color: #94a3b8;
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 359px) {
+  .body-figure-mobile-labels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .body-figure-svg .body-figure-hotspot .ring {
+    animation: none;
+  }
+
+  .body-figure-svg .layer {
+    transition: none !important;
+  }
+}
