@@ -12,6 +12,8 @@ import { extractSheetsFromFile } from '@/services/dataEngineering/etl/spreadshee
 import { parseMeasurementXml } from '@/services/ingestion/xmlMeasurementAdapter';
 import { generateImportTemplate } from '@/services/ingestion/importTemplateService';
 import { deleteLocalDatabase, initializeDatabase } from '@/services/storage';
+import { exportRecordsToSafeCsv } from '@/services/security';
+import type { HealthRecord } from '@/types';
 
 const SAMPLE_CSV = [
   'date_iso,metric,reading,units,context',
@@ -297,5 +299,31 @@ describe('CSV Ingestion Service', () => {
     expect(result.imported_count).toBe(1);
     expect(result.batch.file_format).toBe('csv');
     expect((await getRecords({ astronaut_id: 'astro-csv-1' }))[0].indicator).toBe('glucose');
+  });
+
+  it('neutralizes formula-leading fields in the safe personal CSV export', () => {
+    const records: HealthRecord[] = ['=1+1', '+1+1', '-1+1', '@SUM(1,1)'].map(
+      (source_dataset, index): HealthRecord => ({
+        id: `safe-export-${index}`,
+        astronaut_id: 'astro-csv-1',
+        category: 'blood',
+        timestamp: '2026-10-10T08:00:00Z',
+        indicator: 'glucose',
+        value: 95,
+        unit: 'mg/dL',
+        data_origin: 'SYNTHETIC',
+        ingestion_method: 'CSV_IMPORT',
+        source_dataset,
+        quality_status: 'verified',
+        created_at: '2026-10-10T08:00:00Z',
+        updated_at: '2026-10-10T08:00:00Z',
+      }),
+    );
+
+    const csv = exportRecordsToSafeCsv(records);
+    expect(csv).toContain("'=1+1");
+    expect(csv).toContain("'+1+1");
+    expect(csv).toContain("'-1+1");
+    expect(csv).toContain("'@SUM(1,1)");
   });
 });

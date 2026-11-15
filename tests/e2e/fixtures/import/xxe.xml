@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!DOCTYPE TUMIMeasurements [
+  <!ENTITY external SYSTEM "http://127.0.0.1:9999/private">
+]>
+<TUMIMeasurements>
+  <Measurement>
+    <timestamp>2026-10-10T08:00:00Z</timestamp>
+    <indicator>glucose</indicator>
+    <value>95</value>
+    <unit>&external;</unit>
+  </Measurement>
+</TUMIMeasurements>

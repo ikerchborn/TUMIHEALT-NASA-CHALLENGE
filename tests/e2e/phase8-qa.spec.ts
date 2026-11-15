@@ -232,3 +232,22 @@ test('required viewport screenshots: Home, Check-in, Trends, Body Explorer, Assi
     }
   }
 });
+
+test('Welcome shows the shared 2D illustration and a single start action', async ({ page }) => {
+  const screenshotsDir = resolve(process.cwd(), 'docs', 'screenshots');
+  mkdirSync(screenshotsDir, { recursive: true });
+
+  for (const width of [375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/welcome');
+    await expect(page.getByRole('heading', { name: 'Your health. Your mission.' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Get Started' })).toHaveCount(1);
+    await expect(page.getByRole('img', { name: 'Stylized anatomical illustration' })).toBeVisible();
+    await expect(page.locator('canvas')).toHaveCount(0);
+    await page.screenshot({
+      path: resolve(screenshotsDir, `welcome-${width}.png`),
+      fullPage: true,
+      animations: 'disabled',
+    });
+  }
+});

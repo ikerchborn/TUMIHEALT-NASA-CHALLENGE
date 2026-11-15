@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createLocalProfile } from '@/services';
+import { createLocalProfile, requestPersistentStorage } from '@/services';
 import { useProfile } from '../context/ProfileContext';
+import { BodyFigure } from '../components/BodyFigure';
 import { Alert, Button, Field, StepProgress, inputClass } from '../components/ui';
 
 type OnboardingStep = 'welcome' | 'create-profile' | 'choose-start';
@@ -26,6 +27,7 @@ export function WelcomePage() {
   const [role, setRole] = useState('Mission Specialist');
   const [createdName, setCreatedName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [storageMessage, setStorageMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function handleCreateProfile(e: FormEvent) {
@@ -45,6 +47,7 @@ export function WelcomePage() {
 
     setBusy(true);
     try {
+      const isFirstPersonalProfile = realProfiles.length === 0;
       const created = await createLocalProfile({
         astronaut_id: cleanId,
         display_name: cleanName,
@@ -53,6 +56,14 @@ export function WelcomePage() {
       await refreshProfiles();
       selectProfile(created.astronaut_id);
       setCreatedName(created.display_name);
+      if (isFirstPersonalProfile) {
+        const result = await requestPersistentStorage();
+        setStorageMessage(
+          result.status === 'error'
+            ? `Profile created, but the browser could not request persistent storage: ${result.message}`
+            : `Persistent browser storage request: ${result.status}.`,
+        );
+      }
       setStep('choose-start');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -124,9 +135,11 @@ export function WelcomePage() {
                 className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(34,211,238,0.12),transparent_48%)]"
               />
               <div className="relative max-w-sm text-center">
-                <div
-                  aria-hidden="true"
-                  className="mx-auto mb-6 h-24 w-24 rounded-full border border-cyan-400/30 bg-cyan-400/10 shadow-[0_0_70px_rgba(34,211,238,0.18)]"
+                <BodyFigure
+                  selected={null}
+                  interactive={false}
+                  calmGlow
+                  className="mx-auto mb-4 max-w-[16rem]"
                 />
                 <p className="text-sm font-semibold text-white">Health tracking for space missions</p>
                 <p className="mt-2 text-sm leading-relaxed text-slate-400">
@@ -235,6 +248,7 @@ export function WelcomePage() {
               </p>
             </div>
 
+            {storageMessage && <Alert kind="info">{storageMessage}</Alert>}
             {error && <Alert kind="error">{error}</Alert>}
 
             <div className="grid gap-5 md:grid-cols-2">

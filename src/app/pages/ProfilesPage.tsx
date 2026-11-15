@@ -9,19 +9,25 @@ import {
   getProfileAuditHistory,
   getRecords,
   restoreLocalBackup,
+  getLocalStorageInfo,
+  requestPersistentStorage,
   saveMissionContext,
 } from '@/services';
 import type { AuditEvent, GravityEnvironment, LocalBackupPayload, MissionPhase } from '@/types';
+import type { LocalStorageInfo } from '@/services/storage';
 import { useProfile } from '../context/ProfileContext';
 import { Alert, Button, Card, EmptyState, Field, PageHeader, inputClass } from '../components/ui';
 
 export function ProfilesPage() {
-  const { profiles, active, isDemoMode, selectProfile, refreshProfiles, enterDemoMode, exitDemoMode } = useProfile();
+  const { profiles, realProfiles, active, isDemoMode, selectProfile, refreshProfiles, enterDemoMode, exitDemoMode } = useProfile();
   const [id, setId] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [storageInfo, setStorageInfo] = useState<LocalStorageInfo | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [storageRequestMessage, setStorageRequestMessage] = useState<string | null>(null);
 
   // Mission Context state
   const [missionId, setMissionId] = useState('');
@@ -35,6 +41,25 @@ export function ProfilesPage() {
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
   const [backupErr, setBackupErr] = useState<string | null>(null);
   const [auditHistory, setAuditHistory] = useState<AuditEvent[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getLocalStorageInfo()
+      .then((info) => {
+        if (!cancelled) {
+          setStorageInfo(info);
+          setStorageError(null);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) {
+          setStorageError(cause instanceof Error ? cause.message : String(cause));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!active) {
@@ -63,11 +88,21 @@ export function ProfilesPage() {
     setError(null);
     setBusy(true);
     try {
+      const isFirstPersonalProfile = realProfiles.length === 0;
       const profile = await createLocalProfile({
         astronaut_id: id.trim(),
         display_name: name.trim(),
         mission_role: role.trim() || undefined,
       });
+      if (isFirstPersonalProfile) {
+        const result = await requestPersistentStorage();
+        setStorageRequestMessage(
+          result.status === 'error'
+            ? `Profile created, but the browser could not request persistent storage: ${result.message}`
+            : `Persistent browser storage request: ${result.status}.`,
+        );
+        setStorageInfo(await getLocalStorageInfo());
+      }
       await refreshProfiles();
       selectProfile(profile.astronaut_id);
       setId('');
@@ -198,6 +233,29 @@ export function ProfilesPage() {
           <li>• <strong>Browser data clearing:</strong> Clearing browser site data can permanently remove local records — export JSON backups regularly.</li>
           <li>• <strong>No strong authentication:</strong> Selecting an astronaut profile separates data logically, not as user authentication.</li>
         </ul>
+        <div className="mt-4 rounded-control border border-mission-border bg-slate-950/40 p-4 text-sm">
+          <p>
+            <strong>Persistent storage:</strong>{' '}
+            {storageInfo?.persistence ?? (storageError ? 'status unavailable' : 'checking…')}
+          </p>
+          <p className="mt-1 text-slate-300">
+            <strong>Browser storage used / quota:</strong>{' '}
+            {storageInfo?.usage === undefined
+              ? 'usage unavailable'
+              : `${(storageInfo.usage / 1_048_576).toFixed(2)} MiB`}
+            {' / '}
+            {storageInfo?.quota === undefined
+              ? 'quota unavailable'
+              : `${(storageInfo.quota / 1_048_576).toFixed(2)} MiB`}
+          </p>
+          {storageInfo?.persistence === 'not granted' && (
+            <p className="mt-2 text-amber-200">
+              The browser may evict local data under storage pressure. Export a backup regularly.
+            </p>
+          )}
+          {storageError && <p className="mt-2 text-rose-200">Storage status could not be read: {storageError}</p>}
+          {storageRequestMessage && <Alert kind="info">{storageRequestMessage}</Alert>}
+        </div>
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-mission-border pt-4">
           <p className="text-sm text-slate-300">
             {isDemoMode

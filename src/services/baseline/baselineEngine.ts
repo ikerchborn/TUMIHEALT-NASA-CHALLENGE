@@ -55,8 +55,7 @@ export function calculatePersonalBaselineFromRecords(
     : undefined;
   const toMs = options.dateRange?.to ? Date.parse(options.dateRange.to) : undefined;
 
-  const scoped = records
-    .filter((r) => {
+  const scoped = records.filter((r) => {
       if (
         r.astronaut_id !== options.astronaut_id ||
         r.category !== options.category ||
@@ -73,8 +72,20 @@ export function calculatePersonalBaselineFromRecords(
         if (Number.isNaN(ts) || ts > toMs) return false;
       }
       return true;
-    })
-    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+    });
+  let previousTimestamp = scoped.length > 0 ? Date.parse(scoped[0].timestamp) : 0;
+  for (let index = 1; index < scoped.length; index += 1) {
+    const currentTimestamp = Date.parse(scoped[index].timestamp);
+    if (
+      Number.isNaN(previousTimestamp) ||
+      Number.isNaN(currentTimestamp) ||
+      currentTimestamp < previousTimestamp
+    ) {
+      scoped.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+      break;
+    }
+    previousTimestamp = currentTimestamp;
+  }
 
   const excluded: ExcludedRecordReason[] = [];
   const validRecords: Array<HealthRecord & { value: number }> = [];

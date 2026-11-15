@@ -39,6 +39,22 @@ export class TumiHealthDatabase extends Dexie {
   constructor(dbName: string = DATABASE_NAME) {
     super(dbName);
 
+    this.on('versionchange', (event) => {
+      this.close();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('tumi:database-versionchange', {
+            detail: { newVersion: event.newVersion },
+          }),
+        );
+      }
+    });
+    this.on('blocked', () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('tumi:database-blocked'));
+      }
+    });
+
     // Version 1: Initial local profile and category record stores
     this.version(1).stores({
       profiles: 'astronaut_id, display_name, created_at',

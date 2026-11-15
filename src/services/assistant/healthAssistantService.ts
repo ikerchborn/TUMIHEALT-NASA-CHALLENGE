@@ -246,8 +246,9 @@ export function buildHealthAssistantAnswers(
     };
   } else if (reviewCandidates.length > 0) {
     const flagged = reviewCandidates[0];
+    const supportingRecordIds = new Set(flagged.supporting_records);
     const evidenceRecords = records.filter((record) =>
-      flagged.supporting_records.includes(record.id),
+      supportingRecordIds.has(record.id),
     );
     reviewAnswer = {
       id: 'review',

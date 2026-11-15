@@ -46,13 +46,27 @@ const WelcomePage = lazy(() =>
 );
 
 function Routing() {
-  const { ready, profiles } = useProfile();
+  const { ready, profiles, initializationError } = useProfile();
 
   if (!ready) {
     return (
       <div className="grid h-full place-items-center bg-[#040914] text-sm text-slate-400">
         Initializing local database…
       </div>
+    );
+  }
+
+  if (initializationError) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#040914] p-6 text-slate-100">
+        <section role="alert" className="max-w-xl rounded-xl border border-rose-700/60 bg-rose-950/40 p-6">
+          <h1 className="text-xl font-semibold">Local database unavailable</h1>
+          <p className="mt-3 text-sm leading-relaxed">
+            TUMI-HEALT could not open IndexedDB. Check that browser storage is enabled and available, then reload. No data was sent elsewhere.
+          </p>
+          <p className="mt-3 break-words text-sm text-rose-200">{initializationError}</p>
+        </section>
+      </main>
     );
   }
 

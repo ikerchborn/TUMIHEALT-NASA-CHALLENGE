@@ -18,24 +18,22 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.5",
-    "@types/three": "^0.187.0",
     "dexie": "^4.0.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.18.5",
     "recharts": "^3.10.1",
     "tailwindcss": "^4.3.5",
-    "three": "^0.187.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.65.1",
-    "chrome-launcher": "^1.2.3",
     "@types/node": "^26.6.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "chrome-launcher": "^1.2.3",
     "fake-indexeddb": "^6.0.0",
     "lighthouse": "^13.6.0",
     "typescript": "^5.7.3",

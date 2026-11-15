@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useProfile } from '../context/ProfileContext';
-import { DemoBanner, DisclaimerBanner, Icon, type IconName } from '../components/ui';
+import { Alert, DemoBanner, DisclaimerBanner, Icon, type IconName } from '../components/ui';
 
 interface NavItem {
   to: string;
@@ -101,6 +101,20 @@ export function AppLayout() {
   const navigate = useNavigate();
   const { profiles, active, isDemoMode, selectProfile, exitDemoMode } = useProfile();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [databaseNotice, setDatabaseNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onVersionChange = () =>
+      setDatabaseNotice('This tab closed its local database connection for an upgrade. Reload this page to continue.');
+    const onBlocked = () =>
+      setDatabaseNotice('Another TUMI-HEALT tab is preventing a database upgrade. Close other app tabs, then retry.');
+    window.addEventListener('tumi:database-versionchange', onVersionChange);
+    window.addEventListener('tumi:database-blocked', onBlocked);
+    return () => {
+      window.removeEventListener('tumi:database-versionchange', onVersionChange);
+      window.removeEventListener('tumi:database-blocked', onBlocked);
+    };
+  }, []);
 
   async function handleExitDemo() {
     const remainingId = await exitDemoMode();
@@ -112,6 +126,11 @@ export function AppLayout() {
   return (
     <div className="flex min-h-screen flex-col bg-mission-canvas text-slate-100">
       <DisclaimerBanner />
+      {databaseNotice && (
+        <div className="px-page pt-3 sm:px-6 lg:px-8">
+          <Alert kind="warn">{databaseNotice}</Alert>
+        </div>
+      )}
       {isDemoMode && <DemoBanner onExit={() => void handleExitDemo()} />}
 
       <div className="flex min-h-0 flex-1">

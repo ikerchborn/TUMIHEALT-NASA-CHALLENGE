@@ -213,6 +213,8 @@ export interface LocalBackupPayload {
   mission_contexts: unknown[];
   import_batches: unknown[];
   audit_events: unknown[];
+  daily_checkins?: unknown[];
+  medical_review_requests?: unknown[];
   checksum_sha256: string;
 }
 

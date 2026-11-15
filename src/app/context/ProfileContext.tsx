@@ -12,6 +12,7 @@ import type { LocalAstronautProfile } from '@/types';
 
 interface ProfileContextValue {
   ready: boolean;
+  initializationError: string | null;
   profiles: LocalAstronautProfile[];
   realProfiles: LocalAstronautProfile[];
   active: LocalAstronautProfile | undefined;
@@ -28,6 +29,7 @@ const RETURN_PROFILE_KEY = 'tumi-healt:return-profile';
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<LocalAstronautProfile[]>([]);
   const [activeId, setActiveId] = useState<string | null>(() => {
     try {
@@ -44,7 +46,11 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void initializeDatabase()
       .then(refreshProfiles)
-      .then(() => setReady(true));
+      .then(() => setReady(true))
+      .catch((error: unknown) => {
+        setInitializationError(error instanceof Error ? error.message : String(error));
+        setReady(true);
+      });
   }, [refreshProfiles]);
 
   const selectProfile = useCallback((id: string) => {
@@ -117,6 +123,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       ready,
+      initializationError,
       profiles,
       realProfiles,
       active,
@@ -128,6 +135,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     }),
     [
       ready,
+      initializationError,
       profiles,
       realProfiles,
       active,

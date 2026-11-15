@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import {
   cancelCsvImport,
   confirmCsvImport,
+  decodeUtf8Text,
   extractSheetsFromFile,
   generateImportTemplate,
   getRecords,
@@ -67,13 +68,53 @@ function downloadFile(fileName: string, content: string | ArrayBuffer, mimeType:
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+function fileErrorLocation(error: unknown): string {
+  if (error instanceof MeasurementXmlError && error.line) {
+    return `XML line ${error.line}`;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  const csvLine = /line\s+(\d+)/i.exec(message);
+  if (csvLine) return `CSV line ${csvLine[1]}`;
+  if (/delimiter|header|column/i.test(message)) return 'CSV header row 1';
+  if (/readable data sheets/i.test(message)) return 'workbook';
+  const worksheet = /Worksheet "([^"]+)"/i.exec(message);
+  if (worksheet) {
+    const cell = /first at ([A-Z]+\d+(?::[A-Z]+\d+)?)/i.exec(message);
+    return `worksheet "${worksheet[1]}"${cell ? ` range ${cell[1]}` : ''}`;
+  }
+  return 'file-level';
+}
+
+function fileErrorSuggestion(message: string): string {
+  if (/duplicate import/i.test(message)) {
+    return 'Choose a different file or review the existing batch in History.';
+  }
+  if (/merged cell/i.test(message)) return 'Unmerge the cells and upload the workbook again.';
+  if (/formula/i.test(message)) return 'Save the workbook with calculated values and upload it again.';
+  if (/readable data sheets/i.test(message)) return 'Add a flat data sheet or upload a CSV/XML template.';
+  if (/delimiter/i.test(message)) return 'Save it as comma-separated CSV or use a TUMI-HEALT template.';
+  if (/invalid utf-8/i.test(message)) return 'Resave the file as UTF-8 CSV/XML or upload an XLSX workbook.';
+  if (/not well formed|DTD|entity|nesting/i.test(message)) {
+    return 'Repair the XML or upload a TUMI-HEALT XML template or CSV file.';
+  }
+  if (/not supported/i.test(message)) return 'Upload a CSV, XML, or XLSX file instead.';
+  if (/empty/i.test(message)) return 'Choose a non-empty CSV, XML, or XLSX file.';
+  if (/exceeds|5 MiB/i.test(message)) return 'Choose a smaller supported file.';
+  return 'Correct the file and upload a TUMI-HEALT CSV, XML, or XLSX template.';
+}
+
+function formatFileImportError(fileName: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return `File "${fileName}" · ${fileErrorLocation(error)}: ${message} ${fileErrorSuggestion(message)}`;
+}
+
 function getIssueGuidance(issue: ValidationIssue, category: HealthCategory): string | undefined {
   if (issue.code === 'UNKNOWN_INDICATOR') {
     const indicators = Object.keys(INDICATOR_UNIT_REGISTRY[category]);
     return `Supported ${category} indicators: ${indicators.join(', ')}.`;
   }
   if (issue.field === 'unit' && issue.code.toLowerCase().includes('unit')) {
-    const allowed = issue.message.match(/expected(?: one of)?\s*:?(.+)$/i)?.[1];
+    const allowed = issue.message.match(/expected(?: one of)?\s*:?(.+)$/i)?.[1].replace(/[.]+$/, '').trim();
     return allowed ? `Use one of these units: ${allowed}.` : undefined;
   }
   return undefined;
@@ -210,7 +251,7 @@ export function ImportPage() {
     setCsvText('');
     const constraints = validateMeasurementFileConstraints(file.name, file.size);
     if (!constraints.valid || !constraints.format) {
-      setError(constraints.error ?? 'The selected file could not be validated.');
+      setError(formatFileImportError(file.name, constraints.error ?? 'The selected file could not be validated.'));
       e.target.value = '';
       return;
     }
@@ -218,7 +259,7 @@ export function ImportPage() {
       setFileFormat(constraints.format);
       let extracted: ExtractedSheetCsv[];
       if (constraints.format === 'xml') {
-        const parsed = parseMeasurementXml(await file.text());
+        const parsed = parseMeasurementXml(decodeUtf8Text(await file.arrayBuffer()));
         setXmlRecordLocations(parsed.recordLocations);
         extracted = [{ sheetName: 'XML Measurements', csvText: parsed.csvText }];
       } else {
@@ -233,12 +274,7 @@ export function ImportPage() {
       setSelectedSheetIdx(0);
       loadSheet(file.name, extracted[0]);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(
-        err instanceof MeasurementXmlError && err.line
-          ? `${message} (line ${err.line}).`
-          : message,
-      );
+      setError(formatFileImportError(file.name, err));
     }
   }
 
@@ -247,7 +283,11 @@ export function ImportPage() {
     setError(null);
     setResult(null);
     if (sheets[idx]) {
-      loadSheet(originalFileName, sheets[idx]);
+      try {
+        loadSheet(originalFileName, sheets[idx]);
+      } catch (err) {
+        setError(formatFileImportError(originalFileName, err));
+      }
     }
   }
 
@@ -261,7 +301,7 @@ export function ImportPage() {
     if (!required.every((f) => mapping[f])) {
       const missing = required.filter((field) => !mapping[field]);
       setError(
-        `Missing required column mapping(s): ${missing.join(', ')}. Detected columns: ${inspection.headers.join(', ') || 'none'}. Choose a column for each required field or use a TUMI-HEALT template.`,
+        `File "${originalFileName}" · CSV header row 1: missing required column mapping(s): ${missing.join(', ')}. Detected columns: ${inspection.headers.join(', ') || 'none'}. Choose a column for each required field or use a TUMI-HEALT template.`,
       );
       return;
     }
@@ -280,7 +320,7 @@ export function ImportPage() {
         }),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatFileImportError(originalFileName, err));
     }
   }
 
@@ -303,7 +343,7 @@ export function ImportPage() {
       setInspection(null);
       setSheets([]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatFileImportError(originalFileName, err));
     }
   }
 
@@ -548,6 +588,9 @@ export function ImportPage() {
                 <Alert kind="warn">
                   Only the {preview.valid_records.length} valid row(s) will be imported if you continue. The {preview.invalid_rows.length} rejected row(s) will be skipped; review them or download the rejection report below.
                 </Alert>
+                <p className="my-3 text-xs text-slate-300">
+                  Correct each listed row and upload a TUMI-HEALT {fileFormat.toUpperCase()} template. Invalid rows are not imported.
+                </p>
                 <ul className="my-4 max-h-64 space-y-3 overflow-y-auto text-xs text-rose-200">
                   {preview.invalid_rows.map((row) => {
                     const location = xmlRecordLocations[row.row_number];

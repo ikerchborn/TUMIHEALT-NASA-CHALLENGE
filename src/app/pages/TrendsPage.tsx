@@ -196,8 +196,10 @@ export function TrendsPage() {
     [checkIns, dateRange],
   );
   const timeline = useMemo(
-    () => toTimelineEvents(records, checkIns, missionContexts),
-    [records, checkIns, missionContexts],
+    () => activeView === 'timeline'
+      ? toTimelineEvents(records, checkIns, missionContexts)
+      : [],
+    [activeView, records, checkIns, missionContexts],
   );
   const filteredTimeline = useMemo(
     () => timeline.filter((event) => {

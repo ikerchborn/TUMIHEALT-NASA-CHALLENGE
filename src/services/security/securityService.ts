@@ -7,6 +7,8 @@ import type {
   LocalAstronautProfile,
   LocalBackupPayload,
   MissionContext,
+  DailyCheckIn,
+  MedicalReviewRequest,
 } from '@/types';
 import { recordAuditEvent } from '@/services/audit';
 import { initializeDatabase } from '@/services/storage/db';
@@ -58,6 +60,16 @@ export function validateCsvUploadConstraints(
     };
   }
   return { valid: true };
+}
+
+export function decodeUtf8Text(buffer: ArrayBuffer): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    throw new Error(
+      'The file contains invalid UTF-8 text. Save it as UTF-8 CSV or XML, or upload an XLSX workbook.',
+    );
+  }
 }
 
 /**
@@ -164,6 +176,12 @@ export async function exportLocalBackup(
   const auditEvents = astronautId
     ? await db.audit_events.where('profile_id').equals(astronautId).toArray()
     : await db.audit_events.toArray();
+  const dailyCheckIns = astronautId
+    ? await db.daily_checkins.where('profile_id').equals(astronautId).toArray()
+    : await db.daily_checkins.toArray();
+  const medicalReviewRequests = astronautId
+    ? await db.medical_review_requests.where('profile_id').equals(astronautId).toArray()
+    : await db.medical_review_requests.toArray();
 
   const origins = Array.from(
     new Set<DataOrigin>([
@@ -174,7 +192,7 @@ export async function exportLocalBackup(
   );
 
   const body = {
-    schema_version: 3,
+    schema_version: 4,
     exported_at: new Date().toISOString(),
     astronaut_id: astronautId ?? ('ALL' as const),
     data_origins_present: origins,
@@ -185,6 +203,8 @@ export async function exportLocalBackup(
     mission_contexts: missionContexts,
     import_batches: importBatches,
     audit_events: auditEvents,
+    daily_checkins: dailyCheckIns,
+    medical_review_requests: medicalReviewRequests,
   };
 
   const checksum = await computeSha256Hex(JSON.stringify(body));
@@ -207,7 +227,7 @@ export async function exportLocalBackup(
   };
 }
 
-const SUPPORTED_BACKUP_VERSIONS = new Set([1, 2, 3]);
+const SUPPORTED_BACKUP_VERSIONS = new Set([1, 2, 3, 4]);
 
 function isRecordObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -219,7 +239,7 @@ function validateBackupPayloadStructure(payload: LocalBackupPayload): void {
   }
   if (!SUPPORTED_BACKUP_VERSIONS.has(payload.schema_version)) {
     throw new Error(
-      `Unsupported backup schema_version "${String(payload.schema_version)}". Supported versions: 1, 2, 3.`,
+      `Unsupported backup schema_version "${String(payload.schema_version)}". Supported versions: 1, 2, 3, 4.`,
     );
   }
 
@@ -237,6 +257,17 @@ function validateBackupPayloadStructure(payload: LocalBackupPayload): void {
       throw new Error(`Invalid backup payload: "${key}" must be an array.`);
     }
   }
+  if (
+    payload.schema_version >= 4 &&
+    (!Array.isArray(payload.daily_checkins) ||
+      !Array.isArray(payload.medical_review_requests))
+  ) {
+    throw new Error(
+      'Invalid backup payload: schema version 4 requires daily_checkins and medical_review_requests arrays.',
+    );
+  }
+  const dailyCheckIns = payload.daily_checkins ?? [];
+  const medicalReviewRequests = payload.medical_review_requests ?? [];
 
   for (const profile of payload.profiles) {
     if (
@@ -321,6 +352,33 @@ function validateBackupPayloadStructure(payload: LocalBackupPayload): void {
       throw new Error('Invalid backup payload: malformed audit_event entry.');
     }
   }
+
+  for (const checkin of dailyCheckIns) {
+    if (
+      !isRecordObject(checkin) ||
+      typeof checkin.id !== 'string' ||
+      !checkin.id.trim() ||
+      typeof checkin.profile_id !== 'string' ||
+      !checkin.profile_id.trim() ||
+      typeof checkin.checkin_date !== 'string'
+    ) {
+      throw new Error('Invalid backup payload: malformed daily_checkin entry.');
+    }
+  }
+
+  for (const request of medicalReviewRequests) {
+    if (
+      !isRecordObject(request) ||
+      typeof request.id !== 'string' ||
+      !request.id.trim() ||
+      typeof request.profile_id !== 'string' ||
+      !request.profile_id.trim() ||
+      !Array.isArray(request.record_ids) ||
+      !Array.isArray(request.checkin_ids)
+    ) {
+      throw new Error('Invalid backup payload: malformed medical_review_request entry.');
+    }
+  }
 }
 
 /**
@@ -361,6 +419,8 @@ export async function restoreLocalBackup(
   const missionContexts = payload.mission_contexts as MissionContext[];
   const importBatches = payload.import_batches as ImportBatch[];
   const auditEvents = payload.audit_events as AuditEvent[];
+  const dailyCheckIns = (payload.daily_checkins ?? []) as DailyCheckIn[];
+  const medicalReviewRequests = (payload.medical_review_requests ?? []) as MedicalReviewRequest[];
 
   await db.transaction(
     'rw',
@@ -372,6 +432,8 @@ export async function restoreLocalBackup(
       db.mission_contexts,
       db.import_batches,
       db.audit_events,
+      db.daily_checkins,
+      db.medical_review_requests,
     ],
     async () => {
       if (overwrite) {
@@ -382,6 +444,10 @@ export async function restoreLocalBackup(
         if (missionContexts.length) await db.mission_contexts.bulkPut(missionContexts);
         if (importBatches.length) await db.import_batches.bulkPut(importBatches);
         if (auditEvents.length) await db.audit_events.bulkPut(auditEvents);
+        if (dailyCheckIns.length) await db.daily_checkins.bulkPut(dailyCheckIns);
+        if (medicalReviewRequests.length) {
+          await db.medical_review_requests.bulkPut(medicalReviewRequests);
+        }
       } else {
         for (const p of profiles) {
           if (!(await db.profiles.get(p.astronaut_id))) {
@@ -416,6 +482,16 @@ export async function restoreLocalBackup(
         for (const e of auditEvents) {
           if (!(await db.audit_events.get(e.event_id))) {
             await db.audit_events.add(e);
+          }
+        }
+        for (const checkin of dailyCheckIns) {
+          if (!(await db.daily_checkins.get(checkin.id))) {
+            await db.daily_checkins.add(checkin);
+          }
+        }
+        for (const request of medicalReviewRequests) {
+          if (!(await db.medical_review_requests.get(request.id))) {
+            await db.medical_review_requests.add(request);
           }
         }
       }

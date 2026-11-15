@@ -84,11 +84,21 @@ export function parseCsv(csvText: string): ParsedCsvData {
   }
 
   const headers = matrix[0];
+  const unsafeHeaderIndex = headers.findIndex((header) =>
+    ['__proto__', 'constructor', 'prototype'].includes(header),
+  );
+  if (unsafeHeaderIndex >= 0) {
+    const header = headers[unsafeHeaderIndex];
+    throw new Error(
+      `Unsupported CSV header "${header}" at column ${unsafeHeaderIndex + 1} (header row 1). Rename it and upload a TUMI-HEALT CSV, XML, or XLSX template.`,
+    );
+  }
+
   const rows: Record<string, string>[] = [];
 
   for (let i = 1; i < matrix.length; i += 1) {
     const rowCells = matrix[i];
-    const record: Record<string, string> = {};
+    const record = Object.create(null) as Record<string, string>;
     for (let col = 0; col < headers.length; col += 1) {
       record[headers[col]] = rowCells[col] ?? '';
     }

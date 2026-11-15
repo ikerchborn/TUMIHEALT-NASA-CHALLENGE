@@ -12,6 +12,40 @@ import {
 import type { TrendPoint } from '@/types';
 import type { DailyCheckIn } from '@/types';
 
+const MAX_CHART_POINTS = 250;
+
+export function downsampleTrendPoints(points: readonly TrendPoint[]): TrendPoint[] {
+  if (points.length <= MAX_CHART_POINTS) return [...points];
+
+  const bucketCount = Math.floor(MAX_CHART_POINTS / 5);
+  const bucketSize = Math.ceil(points.length / bucketCount);
+  const sampled: TrendPoint[] = [];
+
+  for (let start = 0; start < points.length; start += bucketSize) {
+    const end = Math.min(start + bucketSize, points.length);
+    let minIndex = -1;
+    let maxIndex = -1;
+    let missingIndex = -1;
+
+    for (let index = start; index < end; index += 1) {
+      const value = points[index].value;
+      if (value === null) {
+        if (missingIndex === -1) missingIndex = index;
+        continue;
+      }
+      if (minIndex === -1 || value < points[minIndex].value!) minIndex = index;
+      if (maxIndex === -1 || value > points[maxIndex].value!) maxIndex = index;
+    }
+
+    const selected = new Set([start, end - 1, minIndex, maxIndex, missingIndex]);
+    for (const index of [...selected].filter((value) => value >= start).sort((a, b) => a - b)) {
+      sampled.push(points[index]);
+    }
+  }
+
+  return sampled;
+}
+
 export function TrendChart({
   points,
   unit,
@@ -28,7 +62,8 @@ export function TrendChart({
   const missingCount = points.filter((p) => p.value === null).length;
   const numericCount = points.length - missingCount;
 
-  const data = points.map((p) => ({
+  const chartPoints = downsampleTrendPoints(points);
+  const data = chartPoints.map((p) => ({
     t: Date.parse(p.timestamp),
     value: p.value,
   }));
@@ -94,7 +129,7 @@ export function TrendChart({
             stroke="#22d3ee"
             strokeWidth={2}
             connectNulls={false}
-            dot={{ r: 3, fill: '#22d3ee' }}
+            dot={data.length <= 250 ? { r: 3, fill: '#22d3ee' } : false}
           />
         </LineChart>
       </ResponsiveContainer>

@@ -7,6 +7,7 @@ import type {
   ResearchDatasetRecord,
 } from '@/types';
 import { parseCsv } from '@/services/ingestion/csvParser';
+import { decodeUtf8Text } from '@/services/security';
 import { getAmbiguousUnitNote } from '@/services/validation/unitRegistry';
 import { parseNullableEtlNumber, TRANSFORMATION_VERSION } from './etlUtils';
 import { processActigraphyDataset } from './processActigraphyDataset';
@@ -78,7 +79,7 @@ export async function extractSheetsFromFile(
     }
     return options.strictPersonalImport ? sheetsWithData : extracted;
   }
-  const csvText = await file.text();
+  const csvText = decodeUtf8Text(await file.arrayBuffer());
   return [{ sheetName: file.name, csvText }];
 }
 
