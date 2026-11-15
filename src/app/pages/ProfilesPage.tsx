@@ -359,13 +359,36 @@ export function ProfilesPage() {
                 </Field>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Environment">
+                <Field label="Environment / Habitat">
                   <input
                     className={inputClass}
                     value={envType}
                     onChange={(e) => setEnvType(e.target.value)}
-                    placeholder="ISS / Bedrest / Lunar"
+                    placeholder="Space Station / Spacecraft / Surface Base"
                   />
+                  <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
+                    {(
+                      [
+                        ['Space Station', 'microgravity'],
+                        ['Spacecraft', 'microgravity'],
+                        ['Surface Rover', 'lunar_partial'],
+                        ['Surface Base', 'martian_partial'],
+                        ['Ground Analog', 'bedrest_analog'],
+                      ] as const
+                    ).map(([presetEnv, presetGrav]) => (
+                      <button
+                        key={presetEnv}
+                        type="button"
+                        onClick={() => {
+                          setEnvType(presetEnv);
+                          setGravity(presetGrav);
+                        }}
+                        className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-slate-300 hover:border-cyan-500 hover:text-white"
+                      >
+                        {presetEnv}
+                      </button>
+                    ))}
+                  </div>
                 </Field>
                 <Field label="Gravity Environment">
                   <select
@@ -373,11 +396,11 @@ export function ProfilesPage() {
                     value={gravity}
                     onChange={(e) => setGravity(e.target.value as GravityEnvironment)}
                   >
-                    <option value="microgravity">Microgravity</option>
+                    <option value="microgravity">Microgravity (0g Orbital)</option>
+                    <option value="lunar_partial">Lunar Partial Gravity (0.16g)</option>
+                    <option value="martian_partial">Martian Partial Gravity (0.38g)</option>
                     <option value="earth_1g">Earth (1g)</option>
-                    <option value="lunar_0_16g">Lunar (0.16g)</option>
-                    <option value="martian_0_38g">Martian (0.38g)</option>
-                    <option value="hypergravity">Hypergravity</option>
+                    <option value="bedrest_analog">Bedrest / Ground Analog</option>
                     <option value="unknown">Unknown</option>
                   </select>
                 </Field>

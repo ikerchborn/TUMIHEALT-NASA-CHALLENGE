@@ -120,4 +120,29 @@ describe('Data Validation Layer', () => {
     expect(check.valid).toBe(false);
     expect(check.errors[0].code).toBe('INCONSISTENT_UNITS');
   });
+
+  it('validates newly supported vital and countermeasure indicators and numeric bounds', () => {
+    const validTemp = validateHealthRecordInput({
+      category: 'cardiovascular',
+      astronaut_id: 'astro-01',
+      timestamp: '2026-11-14T10:00:00Z',
+      indicator: 'body_temperature',
+      value: 36.7,
+      unit: '°C',
+      data_origin: 'SYNTHETIC',
+    });
+    expect(validTemp.valid).toBe(true);
+
+    const invalidSpo2 = validateHealthRecordInput({
+      category: 'cardiovascular',
+      astronaut_id: 'astro-01',
+      timestamp: '2026-11-14T10:00:00Z',
+      indicator: 'blood_oxygen_saturation',
+      value: 105,
+      unit: '%',
+      data_origin: 'SYNTHETIC',
+    });
+    expect(invalidSpo2.valid).toBe(false);
+    expect(invalidSpo2.errors.some((e) => e.code === 'OUT_OF_PERCENTAGE_BOUNDS')).toBe(true);
+  });
 });

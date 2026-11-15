@@ -63,6 +63,11 @@ export const INDICATOR_UNIT_REGISTRY: Record<
     systolic_blood_pressure: ['mmHg'],
     diastolic_blood_pressure: ['mmHg'],
     cardiac_output: ['L/min'],
+    body_temperature: ['°C', 'degC', 'C', '°F', 'degF', 'F'],
+    respiratory_rate: ['breaths/min', 'rpm', 'brpm'],
+    blood_oxygen_saturation: ['%', 'percent'],
+    spo2: ['%', 'percent'],
+    physical_activity: ['minutes', 'min', 'hours', 'kcal'],
   },
 };
 

@@ -317,10 +317,12 @@ export function Drawer({
   );
 }
 
-type Variant = 'primary' | 'ghost' | 'danger';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 const variants: Record<Variant, string> = {
   primary:
     'bg-mission-accent-strong text-white hover:bg-cyan-800 focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:bg-slate-800 disabled:text-slate-300',
+  secondary:
+    'border border-cyan-500/40 bg-slate-900/80 text-cyan-100 hover:bg-slate-800/90 focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50',
   ghost:
     'border border-slate-700 text-slate-200 hover:bg-slate-800/80 focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50',
   danger:

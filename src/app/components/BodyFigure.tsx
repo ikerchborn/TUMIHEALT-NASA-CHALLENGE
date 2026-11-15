@@ -201,7 +201,7 @@ export function BodyFigure({
                     data-system={system.id}
                     role="button"
                     tabIndex={0}
-                    aria-label={`${system.accessibleName}. ${status}.`}
+                    aria-label={`${system.title} ${status}`}
                     aria-pressed={selected === system.id}
                     onClick={() => onSelect?.(system.id)}
                     onKeyDown={(event) => activate(event, system.id)}
@@ -214,7 +214,7 @@ export function BodyFigure({
                       rx="10"
                     />
                     <text x={system.label.x + 14} y={system.label.y + 20}>
-                      {system.title}
+                      {`${system.title} `}
                     </text>
                     <text className="sub" x={system.label.x + 14} y={system.label.y + 36}>
                       {status}

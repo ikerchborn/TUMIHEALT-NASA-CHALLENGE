@@ -347,6 +347,42 @@ function validateCardiovascularFields(
       );
     }
   }
+
+  const normalizedInd = typeof input.indicator === 'string' ? input.indicator.trim().toLowerCase() : '';
+  if (typeof input.value === 'number' && Number.isFinite(input.value)) {
+    if (
+      (normalizedInd === 'blood_oxygen_saturation' || normalizedInd === 'spo2') &&
+      (input.value < 0 || input.value > 100)
+    ) {
+      addIssue(
+        errors,
+        'value',
+        'OUT_OF_PERCENTAGE_BOUNDS',
+        'blood_oxygen_saturation must be between 0 and 100.',
+      );
+    } else if (normalizedInd === 'respiratory_rate' && input.value < 0) {
+      addIssue(
+        errors,
+        'value',
+        'NEGATIVE_RESPIRATORY_RATE',
+        'respiratory_rate cannot be negative.',
+      );
+    } else if (normalizedInd === 'physical_activity' && input.value < 0) {
+      addIssue(
+        errors,
+        'value',
+        'NEGATIVE_PHYSICAL_ACTIVITY',
+        'physical_activity cannot be negative.',
+      );
+    } else if (normalizedInd === 'body_temperature' && input.value <= 0) {
+      addIssue(
+        errors,
+        'value',
+        'INVALID_BODY_TEMPERATURE',
+        'body_temperature must be greater than zero.',
+      );
+    }
+  }
 }
 
 /**

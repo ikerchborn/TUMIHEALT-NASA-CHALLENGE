@@ -99,7 +99,7 @@ function NavigationList({
 
 export function AppLayout() {
   const navigate = useNavigate();
-  const { profiles, active, isDemoMode, selectProfile, exitDemoMode } = useProfile();
+  const { profiles, active, isDemoMode, selectProfile, enterDemoMode, exitDemoMode } = useProfile();
   const [moreOpen, setMoreOpen] = useState(false);
   const [databaseNotice, setDatabaseNotice] = useState<string | null>(null);
 
@@ -155,9 +155,17 @@ export function AppLayout() {
             <NavigationList items={secondaryItems} />
           </nav>
 
-          <p className="mt-5 border-t border-mission-border pt-4 text-xs leading-relaxed text-slate-400">
-            Local-first browser storage. Profile selection is not authentication.
-          </p>
+          <div className="mt-5 space-y-2 border-t border-mission-border pt-4 text-xs leading-relaxed text-slate-400">
+            <p>
+              Local-first browser storage. Zero personal health telemetry leaves this device.
+            </p>
+            <Link
+              to="/welcome"
+              className="inline-block font-medium text-cyan-300 hover:text-cyan-200 hover:underline"
+            >
+              Welcome &amp; Team Overview →
+            </Link>
+          </div>
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
@@ -183,6 +191,15 @@ export function AppLayout() {
               </div>
 
               <div className="ml-auto flex items-center gap-2 sm:gap-3">
+                {!isDemoMode && (
+                  <button
+                    type="button"
+                    onClick={() => void enterDemoMode()}
+                    className="hidden items-center gap-1.5 rounded-control border border-violet-500/40 bg-violet-950/50 px-3 py-2 text-xs font-semibold text-violet-200 transition hover:bg-violet-900/60 sm:inline-flex"
+                  >
+                    <span>Explore 90d Demo</span>
+                  </button>
+                )}
                 <Link
                   to="/import"
                   className="inline-flex items-center gap-2 rounded-control bg-mission-accent-strong px-3 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-mission-accent sm:px-4"

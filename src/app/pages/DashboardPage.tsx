@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  calculatePersonalBaselineFromRecords,
   evaluateSelfAssessmentFromRecords,
   getDailyCheckIn,
+  getIndicatorMetadata,
   getLatestMissionContext,
   getRecords,
   listDailyCheckIns,
@@ -11,11 +13,13 @@ import type {
   AssessmentStatus,
   HealthCategory,
   HealthRecord,
+  IndicatorInformationType,
+  PersonalBaselineResult,
   SelfAssessmentResult,
 } from '@/types';
 import { useProfile } from '../context/ProfileContext';
 import { useAsync } from '../hooks/useAsync';
-import { Alert, Button, Card, EmptyState, StatusBadge } from '../components/ui';
+import { Alert, Button, Card, EmptyState, OriginBadge, StatusBadge } from '../components/ui';
 import { MedicalReviewDrawer } from '../components/MedicalReviewDrawer';
 import type { HealthStatus } from '../components/ui';
 
@@ -26,7 +30,28 @@ interface HomeMetric {
   record?: HealthRecord;
   value?: string;
   trendValues: number[];
+  baseline?: PersonalBaselineResult;
   assessment?: SelfAssessmentResult;
+}
+
+interface IndicatorObservationDetail {
+  indicatorId: string;
+  indicatorName: string;
+  category: HealthCategory;
+  informationType: IndicatorInformationType;
+  latestRecord: HealthRecord;
+  previousRecord?: HealthRecord;
+  baseline: PersonalBaselineResult;
+  assessment: SelfAssessmentResult;
+  observationKindLabel:
+    | 'Statistical Observation'
+    | 'Outdated Measurement Warning'
+    | 'Insufficient Data Notice'
+    | 'Data-Quality Warning'
+    | 'User-Reported Symptom Escalation';
+  whyDisplayed: string;
+  changeExplanation: string;
+  sufficiencySummary: string;
 }
 
 interface RecentActivity {
@@ -54,15 +79,39 @@ function missionDay(startDate: string | undefined): number | undefined {
   return Math.floor((today - start) / 86_400_000) + 1;
 }
 
-function formatDate(timestamp: string): string {
+function formatDate(timestamp: string | null | undefined): string {
+  if (!timestamp) return 'N/A';
   const date = new Date(timestamp);
   return Number.isNaN(date.getTime())
     ? timestamp.slice(0, 10)
-    : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    : date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function formatIndicatorTitle(indicatorId: string): string {
+  const meta = getIndicatorMetadata(indicatorId);
+  if (meta) return meta.name;
+  return indicatorId
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (l) => l.toUpperCase());
+}
+
+function formatInfoTypeLabel(infoType?: IndicatorInformationType): string {
+  switch (infoType) {
+    case 'instrument_measurement':
+      return 'Instrument Measurement';
+    case 'wearable_estimate':
+      return 'Wearable Estimate';
+    case 'laboratory_result':
+      return 'Laboratory Result';
+    case 'subjective_self_report':
+      return 'Subjective Self-Report';
+    default:
+      return 'Recorded Measurement';
+  }
 }
 
 function recordValue(record: HealthRecord): number | null {
-  if (record.category === 'sleep') {
+  if (record.category === 'sleep' && record.indicator === 'sleep_duration') {
     return record.sleep_duration ?? record.value;
   }
   if (record.category === 'cardiovascular' && record.indicator === 'heart_rate') {
@@ -105,7 +154,10 @@ function formatMetricValue(metric: HomeMetric): string | undefined {
     return record.value === null ? undefined : `${record.value} ${record.unit}`;
   }
   if (metric.id === 'blood' && record.category === 'blood') {
-    return record.value === null ? `${record.indicator}: value unavailable` : `${record.indicator}: ${record.value} ${record.unit}`;
+    const label = formatIndicatorTitle(record.indicator);
+    return record.value === null
+      ? `${label}: value unavailable`
+      : `${label}: ${record.value} ${record.unit}`;
   }
   return undefined;
 }
@@ -144,43 +196,219 @@ function buildMetrics(
   return definitions.map((definition) => {
     const matching = records.filter((record) => {
       if (definition.id === 'sleep') {
-        return record.category === 'sleep' &&
-          (record.indicator === 'sleep_duration' ||
-            (record.category === 'sleep' && record.sleep_duration !== undefined));
+        return (
+          record.category === 'sleep' &&
+          (record.indicator === 'sleep_duration' || record.sleep_duration !== undefined)
+        );
       }
       if (definition.id === 'heart-rate') {
-        return record.category === 'cardiovascular' &&
-          (record.indicator === 'heart_rate' ||
-            (record.category === 'cardiovascular' && record.heart_rate !== undefined));
+        return (
+          record.category === 'cardiovascular' &&
+          record.indicator === 'heart_rate'
+        );
       }
       if (definition.id === 'blood-pressure') {
-        return record.category === 'cardiovascular' &&
-          (record.indicator === 'blood_pressure' ||
-            (record.category === 'cardiovascular' && record.blood_pressure != null));
+        return (
+          record.category === 'cardiovascular' &&
+          (record.indicator === 'systolic_blood_pressure' ||
+            record.indicator === 'blood_pressure' ||
+            record.blood_pressure != null)
+        );
       }
-      return record.category === 'blood';
+      return record.category === 'blood' && record.indicator === 'hemoglobin';
     });
-    const latest = matching.at(-1);
+
+    const fallbackMatching =
+      matching.length > 0
+        ? matching
+        : definition.id === 'blood'
+          ? records.filter((r) => r.category === 'blood')
+          : matching;
+
+    const sortedMatching = [...fallbackMatching].sort(
+      (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
+    );
+    const nonNullMatching = sortedMatching.filter((r) => recordValue(r) !== null);
+    const latest = nonNullMatching.at(-1) ?? sortedMatching.at(-1);
+
+    const targetIndicator =
+      definition.id === 'sleep'
+        ? 'sleep_duration'
+        : definition.id === 'heart-rate'
+          ? 'heart_rate'
+          : definition.id === 'blood-pressure'
+            ? latest?.indicator === 'systolic_blood_pressure'
+              ? 'systolic_blood_pressure'
+              : latest?.indicator ?? 'systolic_blood_pressure'
+            : latest?.indicator ?? 'hemoglobin';
+
+    const baseline = latest
+      ? calculatePersonalBaselineFromRecords(records, {
+          astronaut_id: astronautId,
+          category: latest.category,
+          indicator: targetIndicator,
+        })
+      : undefined;
+
     const assessment = latest
       ? evaluateSelfAssessmentFromRecords(records, {
           astronaut_id: astronautId,
           category: latest.category,
-          indicator: latest.indicator,
+          indicator: targetIndicator,
           user_reported_symptoms: reportedSymptoms,
         })
       : undefined;
+
     const metric: HomeMetric = {
       ...definition,
       record: latest,
+      baseline,
       assessment,
-      trendValues: matching
-        .slice(-5)
+      trendValues: nonNullMatching
+        .slice(-12)
         .map((record) => metricTrendValue(definition.id, record))
         .filter((value): value is number => value !== undefined),
     };
     metric.value = formatMetricValue(metric);
     return metric;
   });
+}
+
+function buildExplainableObservations(
+  records: HealthRecord[],
+  astronautId: string,
+  reportedSymptoms: boolean,
+): IndicatorObservationDetail[] {
+  const byIndicator = new Map<string, HealthRecord[]>();
+  for (const rec of records) {
+    const key = `${rec.category}:${rec.indicator}`;
+    const existing = byIndicator.get(key);
+    if (existing) {
+      existing.push(rec);
+    } else {
+      byIndicator.set(key, [rec]);
+    }
+  }
+
+  const details: IndicatorObservationDetail[] = [];
+
+  for (const [key, group] of byIndicator.entries()) {
+    const [category, indicatorId] = key.split(':') as [HealthCategory, string];
+    const sorted = [...group].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+    const nonNull = sorted.filter((r) => r.value !== null);
+    const latestRecord = nonNull.at(-1) ?? sorted.at(-1);
+    if (!latestRecord) continue;
+    const previousRecord = nonNull.length >= 2 ? nonNull.at(-2) : undefined;
+
+    const meta = getIndicatorMetadata(indicatorId);
+    const infoType: IndicatorInformationType =
+      meta?.information_type ??
+      (category === 'blood'
+        ? 'laboratory_result'
+        : category === 'sleep'
+          ? 'wearable_estimate'
+          : 'instrument_measurement');
+
+    const baseline = calculatePersonalBaselineFromRecords(records, {
+      astronaut_id: astronautId,
+      category,
+      indicator: indicatorId,
+    });
+
+    const assessment = evaluateSelfAssessmentFromRecords(records, {
+      astronaut_id: astronautId,
+      category,
+      indicator: indicatorId,
+      user_reported_symptoms: reportedSymptoms,
+    });
+
+    const pct = baseline.period_comparison.percentage_change;
+    const dir = baseline.period_comparison.direction;
+    const earlierMean = baseline.period_comparison.earlier_mean;
+    const recentMean = baseline.period_comparison.recent_mean;
+
+    let observationKindLabel: IndicatorObservationDetail['observationKindLabel'] =
+      'Statistical Observation';
+    let whyDisplayed =
+      'Displayed because this indicator has personal baseline measurements available for longitudinal review.';
+    let changeExplanation = assessment.explanation;
+
+    if (assessment.assessment_status === 'MEDICAL_ESCALATION') {
+      observationKindLabel = 'User-Reported Symptom Escalation';
+      whyDisplayed =
+        'Triggered by Rule R1 (User-Reported Symptoms / Distress): self-reported check-in symptoms were logged alongside measurement history.';
+    } else if (assessment.assessment_status === 'INSUFFICIENT_DATA') {
+      observationKindLabel = 'Insufficient Data Notice';
+      whyDisplayed = `Triggered by Rule R2 (Minimum Sample Requirement): ${baseline.valid_count} of 3 required valid measurements are available.`;
+      changeExplanation = `${formatIndicatorTitle(indicatorId)} currently has ${baseline.valid_count} valid recorded measurement(s). At least 3 valid measurements are required before TUMI-HEALT computes a personal baseline or percentage shift.`;
+    } else if (assessment.assessment_status === 'REVIEW_REQUIRED') {
+      observationKindLabel = 'Statistical Observation';
+      whyDisplayed = `Triggered by Rule R4 (Statistical Period Shift ≥20%): recent period mean shifted by ${pct !== null ? `${pct > 0 ? '+' : ''}${pct}%` : '≥20%'} compared with your earlier personal baseline.`;
+      if (earlierMean !== null && recentMean !== null && pct !== null) {
+        const directionWord = dir === 'decrease' ? 'decreased' : dir === 'increase' ? 'increased' : 'changed';
+        changeExplanation = `Your ${formatIndicatorTitle(indicatorId).toLowerCase()} has ${directionWord} by ${Math.abs(pct)}% in the recent period (recent mean ${recentMean} ${latestRecord.unit} vs. earlier baseline mean ${earlierMean} ${latestRecord.unit}). Review your 90-day history and consider reporting persistent changes to the medical team.`;
+      }
+    } else if (assessment.assessment_status === 'MONITOR') {
+      if (baseline.freshness_days !== null && baseline.freshness_days > 14) {
+        observationKindLabel = 'Outdated Measurement Warning';
+        whyDisplayed = `Triggered by Rule R3 (Data Freshness >14 Days): latest valid measurement was recorded ${baseline.freshness_days} days ago.`;
+        changeExplanation = `${formatIndicatorTitle(indicatorId)} has a valid personal baseline (${baseline.median} ${latestRecord.unit}), but the most recent measurement is ${baseline.freshness_days} days old. Collect or import an updated reading before relying on current trend status.`;
+      } else {
+        observationKindLabel = 'Data-Quality Warning';
+        whyDisplayed = `Triggered by Rule R3 (Excluded / Missing Records): ${baseline.excluded_records.length} record(s) were excluded due to missing values or unit flags.`;
+      }
+    } else {
+      observationKindLabel = 'Statistical Observation';
+      whyDisplayed =
+        'Triggered by Rule R5 (Within Personal Baseline Variability): recent measurements remain within <20% of your earlier personal baseline.';
+      if (earlierMean !== null && recentMean !== null && pct !== null) {
+        changeExplanation = `${formatIndicatorTitle(indicatorId)} remains stable compared with your personal baseline (recent mean ${recentMean} ${latestRecord.unit} vs. earlier baseline mean ${earlierMean} ${latestRecord.unit}, ${pct > 0 ? '+' : ''}${pct}% change).`;
+      }
+    }
+
+    const excludedNote =
+      baseline.excluded_records.length > 0
+        ? ` (${baseline.excluded_records.length} missing/flagged record(s) excluded without zero-filling)`
+        : '';
+    const sufficiencySummary =
+      baseline.status === 'computed'
+        ? `Sufficient history: ${baseline.valid_count} valid measurements of ${baseline.total_examined} examined${excludedNote} · Freshness: ${baseline.freshness_days ?? 0}d ago`
+        : `Insufficient history: ${baseline.valid_count} of 3 required valid measurements (${baseline.total_examined} examined)`;
+
+    details.push({
+      indicatorId,
+      indicatorName: formatIndicatorTitle(indicatorId),
+      category,
+      informationType: infoType,
+      latestRecord,
+      previousRecord,
+      baseline,
+      assessment,
+      observationKindLabel,
+      whyDisplayed,
+      changeExplanation,
+      sufficiencySummary,
+    });
+  }
+
+  // Sort priority: MEDICAL_ESCALATION -> REVIEW_REQUIRED -> MONITOR -> INSUFFICIENT_DATA -> INFORMATIONAL
+  const rank: Record<AssessmentStatus, number> = {
+    MEDICAL_ESCALATION: 0,
+    REVIEW_REQUIRED: 1,
+    MONITOR: 2,
+    INSUFFICIENT_DATA: 3,
+    INFORMATIONAL: 4,
+  };
+
+  details.sort((a, b) => {
+    const diff = rank[a.assessment.assessment_status] - rank[b.assessment.assessment_status];
+    if (diff !== 0) return diff;
+    const pctA = Math.abs(a.baseline.period_comparison.percentage_change ?? 0);
+    const pctB = Math.abs(b.baseline.period_comparison.percentage_change ?? 0);
+    return pctB - pctA;
+  });
+
+  return details;
 }
 
 function TinyTrend({ label, values }: { label: string; values: number[] }) {
@@ -225,7 +453,7 @@ function previousRecordSummary(record: HealthRecord, allRecords: HealthRecord[])
   const oldValue = recordValue(previous);
   const newValue = recordValue(record);
   if (oldValue === null || newValue === null || oldValue === undefined || newValue === undefined) {
-    return 'New record added; one or both values are unavailable.';
+    return 'New record added; one or both values are marked missing (NA).';
   }
   if (oldValue === newValue) return `No numeric change from the previous record (${oldValue} ${record.unit}).`;
   return `Changed from ${oldValue} to ${newValue} ${record.unit}.`;
@@ -239,29 +467,32 @@ function greeting(date = new Date()): string {
 }
 
 export function DashboardPage() {
-  const { active, isDemoMode } = useProfile();
+  const { active, isDemoMode, enterDemoMode } = useProfile();
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [showAllObservations, setShowAllObservations] = useState(false);
+  const [observationFilter, setObservationFilter] = useState<'attention' | 'all'>('attention');
   const id = active?.astronaut_id;
   const today = localDateKey();
+
   const { data, loading, error } = useAsync(async () => {
     if (!id) return undefined;
     const [records, mission, todayCheckIn, checkIns] = await Promise.all([
       getRecords({ astronaut_id: id }),
       getLatestMissionContext(id),
       getDailyCheckIn(id, today),
-      listDailyCheckIns(id, 5),
+      listDailyCheckIns(id, 10),
     ]);
-    const metrics = buildMetrics(
-      records,
-      id,
-      Boolean(todayCheckIn && (todayCheckIn.mood === 'unwell' || todayCheckIn.symptoms.length > 0)),
+    const hasSymptoms = Boolean(
+      todayCheckIn && (todayCheckIn.mood === 'unwell' || todayCheckIn.symptoms.length > 0),
     );
+    const metrics = buildMetrics(records, id, hasSymptoms);
+    const allObservations = buildExplainableObservations(records, id, hasSymptoms);
 
     const activity: RecentActivity[] = [
-      ...records.map((record) => ({
+      ...records.slice(-25).map((record) => ({
         id: record.id,
         timestamp: record.timestamp,
-        title: `${record.indicator.replaceAll('_', ' ')} recorded`,
+        title: `${formatIndicatorTitle(record.indicator)} recorded`,
         detail: previousRecordSummary(record, records),
       })),
       ...checkIns.map((checkIn) => {
@@ -272,7 +503,7 @@ export function DashboardPage() {
         return {
           id: checkIn.id,
           timestamp: checkIn.updated_at,
-          title: 'Daily self-report',
+          title: 'Daily self-report (Check-in)',
           detail: `${checkIn.mood.replaceAll('_', ' ')} · energy ${checkIn.energy_level} of 5 · ${
             checkIn.symptoms.length ? checkIn.symptoms.join(', ') : 'no symptoms selected'
           }. ${change}`,
@@ -285,141 +516,300 @@ export function DashboardPage() {
       records,
       mission,
       todayCheckIn,
+      checkIns,
       metrics,
-      activity: activity.slice(0, 5),
+      allObservations,
+      activity: activity.slice(0, 6),
     };
   }, [id, today]);
 
   const metrics = data?.metrics ?? [];
-  const missingMetrics = metrics.filter((metric) => !metric.record).slice(0, 3);
-  const observations = metrics
-    .filter((metric) => metric.assessment && metric.assessment.assessment_status !== 'INSUFFICIENT_DATA')
-    .slice(0, 3);
+  const allObservations = data?.allObservations ?? [];
+  const missingMetrics = metrics.filter((metric) => !metric.record);
   const day = missionDay(data?.mission?.mission_start_date);
+
+  const sufficientIndicators = allObservations.filter((o) => o.baseline.status === 'computed');
+  const insufficientIndicators = allObservations.filter(
+    (o) => o.baseline.status === 'insufficient_data',
+  );
+  const outdatedIndicators = allObservations.filter(
+    (o) => o.baseline.freshness_days !== null && o.baseline.freshness_days > 14,
+  );
+  const reviewRequiredIndicators = allObservations.filter(
+    (o) =>
+      o.assessment.assessment_status === 'REVIEW_REQUIRED' ||
+      o.assessment.assessment_status === 'MEDICAL_ESCALATION',
+  );
+  const missingValueRecordsCount = (data?.records ?? []).filter((r) => r.value === null).length;
+
+  const filteredObservations =
+    observationFilter === 'attention'
+      ? allObservations.filter((o) => o.assessment.assessment_status !== 'INFORMATIONAL')
+      : allObservations;
+  const visibleObservations = showAllObservations
+    ? filteredObservations
+    : filteredObservations.slice(0, 6);
+
+  const latestOverallTimestamp = (data?.records ?? []).reduce<string | null>((acc, r) => {
+    if (!acc || Date.parse(r.timestamp) > Date.parse(acc)) return r.timestamp;
+    return acc;
+  }, null);
 
   return (
     <div className="space-y-6">
+      {/* Top Mission Overview Banner */}
       <section className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-900 to-cyan-950/40 p-5 sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-widest text-cyan-300">
-              {isDemoMode ? 'DEMO DATA · SYNTHETIC EXAMPLES' : 'MISSION HOME'}
-            </p>
-            <h1 className="mt-2 text-2xl font-semibold text-white sm:text-3xl">
-              {active ? `${greeting()}, ${active.display_name}` : 'Mission Home'}
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs font-bold uppercase tracking-widest text-cyan-300">
+                {isDemoMode
+                  ? 'DEMO MODE · 90-DAY SYNTHETIC ASTRONAUT DATASET'
+                  : 'MISSION HEALTH OVERVIEW'}
+              </p>
+              {isDemoMode && <OriginBadge origin="SYNTHETIC" />}
+            </div>
+            <h1 className="text-2xl font-semibold text-white sm:text-3xl">
+              {active ? `${greeting()}, ${active.display_name}` : 'Dashboard · Health Overview'}
             </h1>
-            <p className="mt-2 text-sm text-slate-300">
+            <p className="text-sm text-slate-200">
               {day
-                ? `Mission day ${day}`
-                : 'Add a mission start date to see your mission day.'}
+                ? `Mission Day ${day} · ${data?.mission?.environment_type ?? 'Orbital Habitat'} (${data?.mission?.gravity_environment ?? 'microgravity'})`
+                : 'Add a mission start date in Mission & Privacy to track your mission day.'}
             </p>
             {active && (
-              <p className="mt-1 text-sm text-slate-400">
-                Active profile: {active.display_name}{active.mission_role ? ` · ${active.mission_role}` : ''}
+              <p className="text-xs text-slate-400">
+                Active profile: <strong className="text-slate-200">{active.display_name}</strong> (
+                <span className="font-mono">{active.astronaut_id}</span>)
+                {active.mission_role ? ` · ${active.mission_role}` : ''}
+                {latestOverallTimestamp
+                  ? ` · Latest measurement: ${formatDate(latestOverallTimestamp)}`
+                  : ''}
               </p>
             )}
           </div>
-          {!day && (
+
+          <div className="flex flex-wrap items-center gap-2.5">
             <Link
-              to="/profiles"
-              className="rounded-lg border border-cyan-700/70 px-3 py-2 text-sm font-medium text-cyan-200 hover:border-cyan-400"
+              to="/import"
+              className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
             >
-              Add mission start
+              + Import data
             </Link>
-          )}
+            <Link
+              to="/trends"
+              className="rounded-lg border border-slate-700 bg-slate-900/80 px-3.5 py-2 text-sm font-medium text-slate-100 hover:border-cyan-500/50"
+            >
+              90-Day Trends
+            </Link>
+            {!day && (
+              <Link
+                to="/profiles"
+                className="rounded-lg border border-cyan-700/70 px-3 py-2 text-sm font-medium text-cyan-200 hover:border-cyan-400"
+              >
+                Add mission start
+              </Link>
+            )}
+          </div>
         </div>
+
+        {/* 90-Day Data Availability & Sufficiency Strip (Answers Questions 1, 2, 4, 5, 6) */}
+        {data && data.records.length > 0 && (
+          <div className="mt-5 grid gap-3 border-t border-slate-800/90 pt-5 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl border border-slate-800/90 bg-slate-950/60 p-3.5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                1. Available Measurements
+              </p>
+              <p className="mt-1 font-mono text-xl font-bold text-white">
+                {data.records.length} records · {allObservations.length} indicators
+              </p>
+              <p className="mt-1 text-xs text-slate-300">
+                Latest recorded: <strong className="text-cyan-300">{formatDate(latestOverallTimestamp)}</strong>
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-800/90 bg-slate-950/60 p-3.5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                2. Baseline Sufficiency
+              </p>
+              <p className="mt-1 font-mono text-xl font-bold text-emerald-300">
+                {sufficientIndicators.length} of {allObservations.length} ready
+              </p>
+              <p className="mt-1 text-xs text-slate-300">
+                &ge;3 valid samples for personal baseline comparison
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-800/90 bg-slate-950/60 p-3.5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                3. Changes to Review
+              </p>
+              <p className="mt-1 font-mono text-xl font-bold text-amber-300">
+                {reviewRequiredIndicators.length} indicator{reviewRequiredIndicators.length === 1 ? '' : 's'}
+              </p>
+              <p className="mt-1 text-xs text-slate-300">
+                {reviewRequiredIndicators.length > 0
+                  ? reviewRequiredIndicators.map((i) => i.indicatorName).join(', ')
+                  : 'All computed baselines within <20% shift'}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-800/90 bg-slate-950/60 p-3.5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                4. Missing or Outdated
+              </p>
+              <p className="mt-1 font-mono text-xl font-bold text-cyan-200">
+                {insufficientIndicators.length} insufficient · {outdatedIndicators.length} outdated
+              </p>
+              <p className="mt-1 text-xs text-slate-300">
+                {missingValueRecordsCount > 0
+                  ? `${missingValueRecordsCount} explicit missing (NA) row(s) preserved`
+                  : 'No missing value rows'}
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       {error && <Alert kind="error">{error}</Alert>}
-      {loading && <p className="text-sm text-slate-400">Loading your local health summary…</p>}
+      {loading && <p className="text-sm text-slate-300">Loading your local health summary…</p>}
 
-      <Card
-        title="Daily check-in"
-        subtitle="A self-reported state, separate from imported health measurements."
-        action={
-          <Link
-            to="/check-in"
-            className="rounded-lg border border-cyan-600/70 bg-cyan-950/40 px-4 py-2 text-sm font-semibold text-cyan-100 hover:border-cyan-400"
-          >
-            {data?.todayCheckIn ? 'Edit' : 'Check in'}
-          </Link>
-        }
-      >
-        {data?.todayCheckIn ? (
-          <p className="text-sm text-slate-200">
-            {data.todayCheckIn.mood.replaceAll('_', ' ')} · energy {data.todayCheckIn.energy_level} of 5 ·{' '}
-            {data.todayCheckIn.symptoms.length
-              ? data.todayCheckIn.symptoms.join(', ')
-              : 'no symptoms selected'}
-          </p>
-        ) : (
-          <p className="text-sm text-slate-300">
-            {loading ? 'Checking today’s entry…' : 'No check-in saved for today.'}
-          </p>
-        )}
-      </Card>
+      {/* Guided Empty State when a personal profile has 0 measurements */}
+      {!loading && data && data.records.length === 0 && (
+        <Card
+          title="No health measurements recorded in this profile yet"
+          subtitle="Start by importing a measurement file or exploring the 90-day synthetic astronaut timeline."
+        >
+          <div className="space-y-4">
+            <p className="text-sm leading-relaxed text-slate-300">
+              Your personal profile (<strong className="text-white">{active?.display_name}</strong>) is currently empty. You can import CSV, XML, or XLSX measurements (or download ready-to-import 90-day synthetic CSV files on the Import page), complete a daily check-in, or switch to the isolated 90-day Demo Astronaut profile.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                to="/import"
+                className="rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+              >
+                Import data
+              </Link>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void enterDemoMode()}
+                className="border-violet-500/50 bg-violet-950/60 text-violet-100 hover:bg-violet-900/70"
+              >
+                Explore with a demo astronaut (90-Day Synthetic Data)
+              </Button>
+              <Link
+                to="/check-in"
+                className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-200 hover:border-cyan-500/50"
+              >
+                Complete Daily Check-In
+              </Link>
+            </div>
+          </div>
+        </Card>
+      )}
 
+      {/* Key Vital & Biomarker Summary Cards */}
       <section aria-labelledby="health-summary-title" className="space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="health-summary-title" className="text-lg font-semibold text-white">Health summary</h2>
+          <div>
+            <h2 id="health-summary-title" className="text-lg font-semibold text-white">
+              Health summary
+            </h2>
+            <p className="text-xs text-slate-400">
+              Latest recorded measurements across Sleep, Cardiovascular Vitals, and Blood Biomarkers compared with your personal baseline.
+            </p>
+          </div>
           <Link to="/import" className="text-sm font-medium text-cyan-300 hover:underline">
             + Import data
           </Link>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {metrics.map((metric) => (
-            <Card key={metric.id} className="min-w-0">
-              <h3 className="text-sm font-semibold text-slate-200">{metric.label}</h3>
-              <p className="mt-2 text-lg font-semibold text-white">
-                {metric.value ?? 'No data yet'}
-              </p>
-              {metric.record ? (
-                <>
-                  <p className="mt-1 text-xs text-slate-400">Latest: {formatDate(metric.record.timestamp)}</p>
-                  <TinyTrend label={`${metric.label} trend`} values={metric.trendValues} />
-                  <StatusBadge
-                    status={assessmentStatusToHealthStatus(metric.assessment?.assessment_status)}
-                    className="mt-3"
-                  />
-                </>
-              ) : (
-                <>
-                  <StatusBadge status="not-enough-data" className="mt-3" />
-                  <Link to="/import" className="mt-3 inline-block text-sm text-cyan-300 hover:underline">
-                    Import data
-                  </Link>
-                </>
-              )}
-            </Card>
-          ))}
+          {metrics.map((metric) => {
+            const pct = metric.baseline?.period_comparison.percentage_change;
+            const median = metric.baseline?.median;
+            return (
+              <Card key={metric.id} className="min-w-0">
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-slate-200">{metric.label}</h3>
+                  {metric.record && <OriginBadge origin={metric.record.data_origin} />}
+                </div>
+                <p className="mt-2 font-mono text-xl font-bold text-white">
+                  {metric.value ?? 'No data yet'}
+                </p>
+                {metric.record ? (
+                  <>
+                    <p className="mt-1 text-xs text-slate-300">
+                      Latest: {formatDate(metric.record.timestamp)}
+                    </p>
+                    {median !== null && median !== undefined && (
+                      <p className="mt-0.5 text-xs text-slate-400">
+                        Personal baseline median: <strong className="text-slate-200">{median} {metric.baseline?.unit}</strong>
+                        {pct !== null && pct !== undefined ? ` (${pct > 0 ? '+' : ''}${pct}% recent shift)` : ''}
+                      </p>
+                    )}
+                    <TinyTrend label={`${metric.label} trend`} values={metric.trendValues} />
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <StatusBadge
+                        status={assessmentStatusToHealthStatus(metric.assessment?.assessment_status)}
+                      />
+                      <Link
+                        to="/trends"
+                        className="text-xs font-medium text-cyan-300 hover:underline"
+                      >
+                        90d chart →
+                      </Link>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <StatusBadge status="not-enough-data" className="mt-3" />
+                    <Link to="/import" className="mt-3 inline-block text-sm text-cyan-300 hover:underline">
+                      Import data
+                    </Link>
+                  </>
+                )}
+              </Card>
+            );
+          })}
         </div>
       </section>
 
-      <Card title="Recent activity" subtitle="Imported records and self-reported check-ins from this profile.">
-        {!data || data.activity.length === 0 ? (
-          <EmptyState>No recent records or check-ins yet. Import measurements or add a daily check-in.</EmptyState>
-        ) : (
-          <ol className="divide-y divide-slate-800">
-            {data.activity.map((item) => (
-              <li key={item.id} className="flex flex-wrap justify-between gap-2 py-3">
-                <div>
-                  <p className="text-sm font-medium text-white">{item.title}</p>
-                  <p className="mt-1 text-sm text-slate-300">{item.detail}</p>
-                </div>
-                <time className="text-sm text-slate-400" dateTime={item.timestamp}>
-                  {formatDate(item.timestamp)}
-                </time>
-              </li>
-            ))}
-          </ol>
-        )}
-      </Card>
-
+      {/* Explainable Observations & Actionable Analysis (Section 4.1, 4.2, 4.3) */}
       <Card
-        title="Health Assistant"
-        subtitle="Observations use the existing self-assessment rules and your local records only."
+        title="Health Assistant · Explainable Observations & Next Steps"
+        subtitle="Every observation distinguishes statistical baseline shifts, data-quality/outdated notices, missing history, and self-reported symptoms. Non-diagnostic decision support."
+        action={
+          allObservations.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setObservationFilter('attention')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  observationFilter === 'attention'
+                    ? 'bg-cyan-500 text-slate-950'
+                    : 'border border-slate-700 bg-slate-900 text-slate-300 hover:text-white'
+                }`}
+              >
+                Needs Attention ({allObservations.filter((o) => o.assessment.assessment_status !== 'INFORMATIONAL').length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setObservationFilter('all')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  observationFilter === 'all'
+                    ? 'bg-cyan-500 text-slate-950'
+                    : 'border border-slate-700 bg-slate-900 text-slate-300 hover:text-white'
+                }`}
+              >
+                All Indicators ({allObservations.length})
+              </button>
+            </div>
+          ) : undefined
+        }
       >
-        {observations.length === 0 && missingMetrics.length === 0 ? (
+        {allObservations.length === 0 && missingMetrics.length === 0 ? (
           <EmptyState>
             {data?.records.length
               ? 'Not enough data yet for an assessment. Import additional records to build a personal history.'
@@ -427,20 +817,138 @@ export function DashboardPage() {
           </EmptyState>
         ) : (
           <div className="space-y-4">
-            {observations.length > 0 && (
-              <ul className="space-y-3">
-                {observations.map((metric) => (
-                  <li key={metric.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-                    <p className="text-sm font-semibold text-white">{metric.label}</p>
-                    <p className="mt-1 text-sm text-slate-300">{metric.assessment?.explanation}</p>
-                    <p className="mt-2 text-sm text-slate-400">{metric.assessment?.recommended_next_action}</p>
-                  </li>
-                ))}
+            {visibleObservations.length > 0 ? (
+              <ul className="space-y-3.5">
+                {visibleObservations.map((obs) => {
+                  const prevVal = obs.previousRecord ? recordValue(obs.previousRecord) : null;
+                  const currVal = recordValue(obs.latestRecord);
+                  const earlierMean = obs.baseline.period_comparison.earlier_mean;
+                  const recentMean = obs.baseline.period_comparison.recent_mean;
+                  const pct = obs.baseline.period_comparison.percentage_change;
+
+                  return (
+                    <li
+                      key={`${obs.category}:${obs.indicatorId}`}
+                      data-testid="observation-detail-card"
+                      className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 sm:p-5"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-base font-semibold text-white">
+                              {obs.indicatorName}
+                            </h3>
+                            <span className="rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs font-medium text-cyan-300">
+                              {formatInfoTypeLabel(obs.informationType)}
+                            </span>
+                            <span className="rounded-md border border-slate-700/80 bg-slate-900/60 px-2 py-0.5 text-xs font-medium text-slate-300">
+                              {obs.observationKindLabel}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-400">
+                            Recorded on <strong className="text-slate-200">{formatDate(obs.latestRecord.timestamp)}</strong>
+                            {obs.baseline.time_period.from && obs.baseline.time_period.to
+                              ? ` · 90-day comparison window: ${formatDate(obs.baseline.time_period.from)} – ${formatDate(obs.baseline.time_period.to)}`
+                              : ''}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <StatusBadge
+                            status={assessmentStatusToHealthStatus(obs.assessment.assessment_status)}
+                          />
+                          <OriginBadge origin={obs.latestRecord.data_origin} />
+                        </div>
+                      </div>
+
+                      {/* Value, Unit, Previous Value & Baseline Comparison */}
+                      <div className="mt-3 grid gap-2.5 rounded-lg border border-slate-800/80 bg-slate-900/60 p-3 text-xs sm:grid-cols-3">
+                        <div>
+                          <span className="text-slate-400">Current Value &amp; Unit:</span>
+                          <p className="mt-0.5 font-mono text-sm font-bold text-cyan-300">
+                            {currVal !== null ? `${currVal} ${obs.latestRecord.unit}` : `Missing (NA) ${obs.latestRecord.unit}`}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Previous Recorded Value:</span>
+                          <p className="mt-0.5 font-mono text-sm font-semibold text-slate-200">
+                            {prevVal !== null && obs.previousRecord
+                              ? `${prevVal} ${obs.previousRecord.unit} (${formatDate(obs.previousRecord.timestamp)})`
+                              : 'No prior sample'}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Personal Baseline Comparison:</span>
+                          <p className="mt-0.5 font-mono text-sm font-semibold text-slate-200">
+                            {earlierMean !== null && recentMean !== null && pct !== null
+                              ? `${earlierMean} → ${recentMean} ${obs.latestRecord.unit} (${pct > 0 ? '+' : ''}${pct}%)`
+                              : obs.baseline.median !== null
+                                ? `Median: ${obs.baseline.median} ${obs.latestRecord.unit}`
+                                : 'Requires ≥3 valid samples'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Plain-language explanation, why displayed, data sufficiency, and next step */}
+                      <div className="mt-3 space-y-2 text-sm">
+                        <p className="leading-relaxed text-slate-200">
+                          <strong className="text-white">Observed change:</strong> {obs.changeExplanation}
+                        </p>
+                        <p className="text-xs leading-relaxed text-slate-300">
+                          <strong className="text-cyan-300">Why this observation is shown:</strong> {obs.whyDisplayed}
+                        </p>
+                        <p className="text-xs leading-relaxed text-slate-300">
+                          <strong className="text-slate-200">Data quality &amp; sufficiency:</strong> {obs.sufficiencySummary}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-cyan-900/50 bg-cyan-950/25 px-3 py-2 text-xs">
+                          <p className="text-cyan-100">
+                            <strong className="text-cyan-300">Suggested next step:</strong>{' '}
+                            {obs.assessment.recommended_next_action}
+                          </p>
+                          <div className="flex items-center gap-3">
+                            <Link
+                              to="/trends"
+                              className="font-semibold text-cyan-300 hover:underline"
+                            >
+                              Inspect timeline →
+                            </Link>
+                            <Link
+                              to="/guides"
+                              className="font-semibold text-slate-300 hover:text-white hover:underline"
+                            >
+                              Indicator guide →
+                            </Link>
+                          </div>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
+            ) : (
+              <p className="text-sm text-slate-300">
+                No indicators currently require special review. Switch to <strong>All Indicators ({allObservations.length})</strong> to inspect all stable baselines.
+              </p>
             )}
+
+            {filteredObservations.length > 6 && (
+              <div className="pt-1">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setShowAllObservations((prev) => !prev)}
+                  className="text-xs"
+                >
+                  {showAllObservations
+                    ? 'Show fewer observations'
+                    : `Show all ${filteredObservations.length} observations`}
+                </Button>
+              </div>
+            )}
+
             {missingMetrics.length > 0 && (
-              <div>
-                <h3 className="text-sm font-semibold text-slate-200">Missing data</h3>
+              <div className="border-t border-slate-800 pt-3">
+                <h3 className="text-sm font-semibold text-slate-200">Missing category data</h3>
                 <ul className="mt-2 flex flex-wrap gap-2">
                   {missingMetrics.map((metric) => (
                     <li key={metric.id}>
@@ -459,14 +967,87 @@ export function DashboardPage() {
         )}
       </Card>
 
-      <Card title="Medical team access" subtitle="This app does not connect to your medical team.">
-        <p className="text-sm leading-relaxed text-slate-300">
-          Prepare a local summary of selected measurements and check-ins. Nothing is sent to or received from a medical team.
-        </p>
-        <Button type="button" className="mt-4" onClick={() => setReviewOpen(true)}>
-          Request medical review
-        </Button>
+      {/* Subjective Self-Report Check-in & Medical Review Row */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card
+          title="Daily check-in (Subjective Self-Report)"
+          subtitle="Mood, fatigue/energy, and self-reported symptoms—kept strictly separate from laboratory and instrument measurements."
+          action={
+            <Link
+              to="/check-in"
+              className="rounded-lg border border-cyan-600/70 bg-cyan-950/40 px-4 py-2 text-sm font-semibold text-cyan-100 hover:border-cyan-400"
+            >
+              {data?.todayCheckIn ? 'Edit' : 'Check in'}
+            </Link>
+          }
+        >
+          {data?.todayCheckIn ? (
+            <div className="space-y-1.5 text-sm">
+              <p className="text-slate-200">
+                <strong>Today:</strong> {data.todayCheckIn.mood.replaceAll('_', ' ')} · energy{' '}
+                {data.todayCheckIn.energy_level} of 5 ·{' '}
+                {data.todayCheckIn.symptoms.length
+                  ? data.todayCheckIn.symptoms.map((s) => s.replaceAll('_', ' ')).join(', ')
+                  : 'no symptoms selected'}
+              </p>
+              {data.todayCheckIn.note && (
+                <p className="text-xs text-slate-300">Note: {data.todayCheckIn.note}</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-300">
+              {loading ? 'Checking today’s entry…' : 'No check-in saved for today.'}
+            </p>
+          )}
+        </Card>
+
+        <Card
+          title="Medical team access"
+          subtitle="This app does not transmit telemetry automatically to an external server."
+        >
+          <p className="text-sm leading-relaxed text-slate-300">
+            Prepare a structured local summary package combining selected 90-day measurements, baseline shifts, and daily check-ins for flight surgeon review.
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Button type="button" onClick={() => setReviewOpen(true)}>
+              Request medical review
+            </Button>
+            <Link
+              to="/assistant"
+              className="text-sm font-medium text-cyan-300 hover:underline"
+            >
+              Ask Rule-Based Health Assistant →
+            </Link>
+          </div>
+        </Card>
+      </div>
+
+      {/* Recent Activity */}
+      <Card
+        title="Recent activity"
+        subtitle="Latest imported measurements and self-reported check-ins from this profile."
+      >
+        {!data || data.activity.length === 0 ? (
+          <EmptyState>
+            No recent records or check-ins yet. Import measurements or add a daily check-in.
+          </EmptyState>
+        ) : (
+          <ol className="divide-y divide-slate-800">
+            {data.activity.map((item) => (
+              <li key={item.id} className="flex flex-wrap justify-between gap-2 py-3">
+                <div>
+                  <p className="text-sm font-medium text-white">{item.title}</p>
+                  <p className="mt-1 text-sm text-slate-300">{item.detail}</p>
+                </div>
+                <time className="text-sm text-slate-400" dateTime={item.timestamp}>
+                  {formatDate(item.timestamp)}
+                </time>
+              </li>
+            ))}
+          </ol>
+        )}
       </Card>
+
       <MedicalReviewDrawer
         open={reviewOpen}
         onClose={() => setReviewOpen(false)}

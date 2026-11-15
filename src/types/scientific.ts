@@ -5,6 +5,12 @@ export type IndicatorAvailabilityStatus =
   | 'partial_in_nasa_dataset'
   | 'planned_manual_or_device';
 
+export type IndicatorInformationType =
+  | 'instrument_measurement'
+  | 'laboratory_result'
+  | 'wearable_estimate'
+  | 'subjective_self_report';
+
 export interface ScientificIndicatorMetadata {
   indicator_id: string;
   name: string;
@@ -19,6 +25,8 @@ export interface ScientificIndicatorMetadata {
   evidence_reference: string[];
   limitations: string[];
   availability_status: IndicatorAvailabilityStatus;
+  information_type?: IndicatorInformationType;
+  supports_trend_analysis?: boolean;
 }
 
 export interface ExcludedRecordReason {

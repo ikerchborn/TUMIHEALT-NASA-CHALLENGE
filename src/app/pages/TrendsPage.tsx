@@ -3,14 +3,17 @@ import type { DateRangeFilter, HealthCategory, HealthRecord, MissionContext } fr
 import {
   buildTrendPoints,
   calculatePersonalBaselineFromRecords,
+  evaluateSelfAssessmentFromRecords,
   filterRecordsByDateRange,
+  getIndicatorMetadata,
   getMissionContexts,
   listDailyCheckIns,
   queryRecords,
 } from '@/services';
 import { TrendChart } from '../components/TrendChart';
 import { useProfile } from '../context/ProfileContext';
-import { Alert, Card, EmptyState, PageHeader, inputClass } from '../components/ui';
+import { Alert, Card, EmptyState, OriginBadge, PageHeader, StatusBadge, inputClass } from '../components/ui';
+import type { HealthStatus } from '../components/ui';
 
 const ranges = [
   { label: '7D', days: 7 },
@@ -20,10 +23,16 @@ const ranges = [
   { label: 'MAX', days: null },
 ] as const;
 
+const BP_INDICATORS = new Set([
+  'systolic_blood_pressure',
+  'diastolic_blood_pressure',
+  'blood_pressure',
+]);
+
 const metrics = [
-  { id: 'blood', title: 'Blood', category: 'blood', preferred: 'glucose' },
+  { id: 'blood', title: 'Blood', category: 'blood', preferred: 'hemoglobin' },
   { id: 'sleep', title: 'Sleep', category: 'sleep', preferred: 'sleep_duration' },
-  { id: 'heart-rate', title: 'Heart rate', category: 'cardiovascular', preferred: 'heart_rate' },
+  { id: 'heart-rate', title: 'Heart rate & vitals', category: 'cardiovascular', preferred: 'heart_rate' },
   { id: 'blood-pressure', title: 'Blood pressure', category: 'cardiovascular', preferred: 'systolic_blood_pressure' },
 ] as const satisfies readonly {
   id: string;
@@ -31,6 +40,16 @@ const metrics = [
   category: HealthCategory;
   preferred: string;
 }[];
+
+function isIndicatorAllowedForPanel(panelId: string, indicator: string): boolean {
+  if (panelId === 'blood-pressure') {
+    return BP_INDICATORS.has(indicator);
+  }
+  if (panelId === 'heart-rate') {
+    return !BP_INDICATORS.has(indicator);
+  }
+  return true;
+}
 
 interface TimelineEvent {
   id: string;
@@ -47,6 +66,11 @@ interface TimelineGroup {
 function localDateKey(value: string): string {
   const date = new Date(value);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatIndicatorOptionLabel(indicatorId: string): string {
+  const meta = getIndicatorMetadata(indicatorId);
+  return meta ? `${meta.name} (${meta.measurement_unit})` : indicatorId;
 }
 
 function groupTimelineEvents(
@@ -67,7 +91,7 @@ function groupTimelineEvents(
       ? dateKey
       : dayOffset < 0
         ? `Before mission · ${dateKey}`
-        : `Mission day ${dayOffset + 1}`;
+        : `Mission day ${dayOffset + 1} · ${dateKey}`;
     const group = groups.get(label) ?? [];
     group.push(event);
     groups.set(label, group);
@@ -83,8 +107,11 @@ function toTimelineEvents(
   const measurementEvents = records.map((record) => ({
     id: `record-${record.id}`,
     date: record.timestamp,
-    title: `${record.category} measurement · ${record.indicator}`,
-    detail: record.value === null ? `Missing value · ${record.unit}` : `${record.value} ${record.unit} · ${record.data_origin}`,
+    title: `${record.category} measurement · ${getIndicatorMetadata(record.indicator)?.name ?? record.indicator}`,
+    detail:
+      record.value === null
+        ? `Missing value (NA) · ${record.unit} · ${record.data_origin}`
+        : `${record.value} ${record.unit} · ${record.data_origin}`,
   }));
   const checkInEvents = checkIns.map((checkIn) => ({
     id: `check-in-${checkIn.id}`,
@@ -117,11 +144,11 @@ function toTimelineEvents(
 }
 
 export function TrendsPage() {
-  const { active } = useProfile();
+  const { active, isDemoMode } = useProfile();
   const [records, setRecords] = useState<HealthRecord[]>([]);
   const [checkIns, setCheckIns] = useState<Awaited<ReturnType<typeof listDailyCheckIns>>>([]);
   const [missionContexts, setMissionContexts] = useState<MissionContext[]>([]);
-  const [rangeDays, setRangeDays] = useState<number | null>(30);
+  const [rangeDays, setRangeDays] = useState<number | null>(90);
   const [activeView, setActiveView] = useState<'trends' | 'timeline'>('trends');
   const [selectedIndicators, setSelectedIndicators] = useState<Record<string, string>>(
     Object.fromEntries(metrics.map((metric) => [metric.id, metric.preferred])),
@@ -158,9 +185,18 @@ export function TrendsPage() {
           Object.fromEntries(
             metrics.map((metric) => {
               const available = personalRecords
-                .filter((record) => record.category === metric.category)
+                .filter(
+                  (record) =>
+                    record.category === metric.category &&
+                    isIndicatorAllowedForPanel(metric.id, record.indicator),
+                )
                 .map((record) => record.indicator);
-              return [metric.id, available.includes(metric.preferred) ? metric.preferred : available[0] ?? metric.preferred];
+              return [
+                metric.id,
+                available.includes(metric.preferred)
+                  ? metric.preferred
+                  : available[0] ?? metric.preferred,
+              ];
             }),
           ),
         );
@@ -184,6 +220,7 @@ export function TrendsPage() {
       to: now.toISOString(),
     };
   }, [rangeDays]);
+
   const visibleRecords = useMemo(
     () => filterRecordsByDateRange(records, dateRange),
     [records, dateRange],
@@ -215,7 +252,7 @@ export function TrendsPage() {
     .filter((date): date is string => Boolean(date))
     .sort()[0];
   const visibleTimeline = useMemo(
-    () => filteredTimeline.slice(0, 100),
+    () => filteredTimeline.slice(0, 120),
     [filteredTimeline],
   );
   const timelineGroups = useMemo(
@@ -229,6 +266,7 @@ export function TrendsPage() {
 
   const panels = metrics.map((metric) => {
     const indicator = selectedIndicators[metric.id] ?? metric.preferred;
+    const meta = getIndicatorMetadata(indicator);
     const allMatchingRecords = visibleRecords.filter(
       (record) => record.category === metric.category && record.indicator === indicator,
     );
@@ -237,6 +275,11 @@ export function TrendsPage() {
       category: metric.category,
       indicator,
       minSamples: 3,
+    });
+    const assessment = evaluateSelfAssessmentFromRecords(records, {
+      astronaut_id: active.astronaut_id,
+      category: metric.category,
+      indicator,
     });
     const matchingRecords = baseline.unit
       ? allMatchingRecords.filter((record) => record.unit === baseline.unit)
@@ -250,11 +293,15 @@ export function TrendsPage() {
       : null;
     const indicators = Array.from(new Set(
       records
-        .filter((record) => record.category === metric.category)
+        .filter(
+          (record) =>
+            record.category === metric.category &&
+            isIndicatorAllowedForPanel(metric.id, record.indicator),
+        )
         .map((record) => record.indicator),
     )).sort();
     if (!indicators.includes(indicator)) indicators.unshift(indicator);
-    const unit = latest?.unit ?? baseline.unit;
+    const unit = latest?.unit ?? baseline.unit ?? meta?.measurement_unit ?? null;
     const baselineChange =
       baseline.status === 'computed' && latest && baseline.median !== null
         ? latest.value - baseline.median
@@ -265,15 +312,29 @@ export function TrendsPage() {
     const summary = latest && average !== null
       ? `Latest: ${latest.value} ${latest.unit} on ${new Date(latest.timestamp).toLocaleDateString('en-US')}. Average in this range: ${average.toFixed(2)} ${unit ?? ''}. ${changeDescription}`
       : 'No numeric measurements in this range. Import personal records for this indicator to see a trend.';
+
+    const healthStatus: HealthStatus =
+      assessment.assessment_status === 'INFORMATIONAL'
+        ? 'within-usual-range'
+        : assessment.assessment_status === 'REVIEW_REQUIRED'
+          ? 'different-from-usual'
+          : assessment.assessment_status === 'MONITOR' ||
+              assessment.assessment_status === 'MEDICAL_ESCALATION'
+            ? 'review-recommended'
+            : 'not-enough-data';
+
     return {
       metric,
       indicator,
+      meta,
       matchingRecords,
       excludedUnitCount: allMatchingRecords.length - matchingRecords.length,
       latest,
       average,
       unit,
       baseline,
+      assessment,
+      healthStatus,
       baselineChange,
       indicators,
       summary,
@@ -283,34 +344,41 @@ export function TrendsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Personal health history"
-        title="My Health Trends"
-        subtitle={`Measurements and check-ins for ${active.display_name}. Personal records only; NASA research aggregates are not used.`}
+        eyebrow={isDemoMode ? '90-Day Synthetic Astronaut Timeline' : 'Personal health history'}
+        title="My Health Trends & 90-Day Timeline"
+        subtitle={`Measurements, baseline comparisons, and daily check-ins for ${active.display_name}. Personal records only; NASA research aggregates are never mixed into personal charts.`}
+        primaryAction={isDemoMode ? <OriginBadge origin="SYNTHETIC" /> : undefined}
       />
       <div className="space-y-6">
         <Card title="Time range">
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Trend time range">
-            {ranges.map((range) => (
-              <button
-                key={range.label}
-                type="button"
-                aria-pressed={rangeDays === range.days}
-                onClick={() => setRangeDays(range.days)}
-                className={`rounded-lg border px-4 py-2 text-sm ${
-                  rangeDays === range.days
-                    ? 'border-cyan-400 bg-cyan-950/50 text-cyan-200'
-                    : 'border-slate-700 text-slate-300 hover:border-slate-500'
-                }`}
-              >
-                {range.label}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Trend time range">
+              {ranges.map((range) => (
+                <button
+                  key={range.label}
+                  type="button"
+                  aria-pressed={rangeDays === range.days}
+                  onClick={() => setRangeDays(range.days)}
+                  className={`rounded-lg border px-4 py-2 text-sm font-medium ${
+                    rangeDays === range.days
+                      ? 'border-cyan-400 bg-cyan-950/60 text-cyan-200'
+                      : 'border-slate-700 text-slate-300 hover:border-slate-500'
+                  }`}
+                >
+                  {range.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-slate-400">
+              Showing {visibleRecords.length} of {records.length} recorded measurements in selected window
+            </p>
           </div>
         </Card>
+
         <div className="flex gap-2 border-b border-slate-800" role="tablist" aria-label="Trend views">
           {([
-            ['trends', 'Trends'],
-            ['timeline', 'Mission Timeline'],
+            ['trends', '90-Day Indicator Trends'],
+            ['timeline', 'Mission Day Timeline'],
           ] as const).map(([view, label]) => (
             <button
               key={view}
@@ -341,48 +409,55 @@ export function TrendsPage() {
                     <Card
                       key={panel.metric.id}
                       title={panel.metric.title}
-                      subtitle={panel.indicator}
+                      subtitle={panel.meta?.name ?? panel.indicator}
                       className="p-4"
                     >
                       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
                         <dt className="text-slate-400">Latest</dt>
-                        <dd className="text-right text-slate-200">
+                        <dd className="text-right font-mono font-semibold text-slate-200">
                           {panel.latest ? `${panel.latest.value} ${panel.latest.unit}` : 'No data'}
                         </dd>
                         <dt className="text-slate-400">Average in range</dt>
-                        <dd className="text-right text-slate-200">
+                        <dd className="text-right font-mono text-slate-200">
                           {panel.average === null ? '—' : `${panel.average.toFixed(2)} ${panel.unit ?? ''}`}
                         </dd>
                         <dt className="text-slate-400">Vs personal median</dt>
-                        <dd className="text-right text-slate-200">
+                        <dd className="text-right font-mono text-slate-200">
                           {panel.baselineChange === null
                             ? 'Not enough data'
                             : `${panel.baselineChange > 0 ? '+' : ''}${panel.baselineChange.toFixed(2)} ${panel.unit ?? ''}`}
                         </dd>
                         <dt className="text-slate-400">Records in range</dt>
-                        <dd className="text-right text-slate-200">{panel.matchingRecords.length}</dd>
+                        <dd className="text-right font-mono text-slate-200">{panel.matchingRecords.length}</dd>
                       </dl>
+                      <div className="mt-3">
+                        <StatusBadge status={panel.healthStatus} />
+                      </div>
                     </Card>
                   ))}
                 </section>
 
-                <div className="grid gap-4 xl:grid-cols-2">
+                <div className="grid gap-5 xl:grid-cols-2">
                   {panels.map((panel) => (
                     <Card
                       key={panel.metric.id}
                       title={panel.metric.title}
-                      subtitle={panel.indicator}
+                      subtitle={panel.meta ? `${panel.meta.name} (${panel.indicator})` : panel.indicator}
                       action={(
                         <select
                           aria-label={`${panel.metric.title} indicator`}
-                          className={`${inputClass} w-auto min-w-40`}
+                          className={`${inputClass} w-auto min-w-44`}
                           value={panel.indicator}
                           onChange={(event) => setSelectedIndicators((current) => ({
                             ...current,
                             [panel.metric.id]: event.target.value,
                           }))}
                         >
-                          {panel.indicators.map((item) => <option key={item} value={item}>{item}</option>)}
+                          {panel.indicators.map((item) => (
+                            <option key={item} value={item}>
+                              {formatIndicatorOptionLabel(item)}
+                            </option>
+                          ))}
                         </select>
                       )}
                     >
@@ -402,27 +477,44 @@ export function TrendsPage() {
                         }
                         symptomCheckIns={visibleCheckIns}
                       />
-                      <p className="mt-2 text-xs leading-relaxed text-slate-400">{panel.summary}</p>
+
+                      <p className="mt-2 text-xs leading-relaxed text-slate-300">{panel.summary}</p>
                       <p className="mt-1 text-[11px] text-slate-400">
                         {panel.baseline.status === 'computed'
-                          ? 'The shaded band uses the existing personal mean ± standard deviation; it is descriptive, not a medical threshold.'
-                          : 'A personal baseline is shown only after at least three valid, compatible measurements.'}
+                          ? 'The shaded band shows your personal mean ± 1 SD across available records; it is descriptive and not a clinical reference range.'
+                          : 'A personal baseline is shown only after at least three valid, unit-consistent measurements.'}
                         {panel.excludedUnitCount > 0
                           ? ` ${panel.excludedUnitCount} record(s) with a different unit were excluded from this chart.`
                           : ''}
                       </p>
-                      {panel.baseline.status === 'insufficient_data' && (
-                        <p className="mt-1 text-xs text-slate-400">
-                          Personal baseline is not shown: {panel.baseline.limitations.find((item) => item.includes('valid measurements'))}
+
+                      {/* Progressive-disclosure Indicator Details & Baseline Explanation */}
+                      <div className="mt-3 rounded-xl border border-slate-800/90 bg-slate-950/60 p-3.5 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-semibold text-white">
+                            {panel.meta?.name ?? panel.indicator} · Observation &amp; Meaning
+                          </span>
+                          <StatusBadge status={panel.healthStatus} />
+                        </div>
+                        {panel.meta && (
+                          <p className="mt-1.5 text-slate-300">
+                            <strong>What it means:</strong> {panel.meta.definition} ({panel.meta.scientific_relevance})
+                          </p>
+                        )}
+                        <p className="mt-1.5 text-slate-300">
+                          <strong>Baseline comparison:</strong> {panel.assessment.explanation}
                         </p>
-                      )}
+                        <p className="mt-1 text-cyan-200">
+                          <strong>Next step:</strong> {panel.assessment.recommended_next_action}
+                        </p>
+                      </div>
                     </Card>
                   ))}
                 </div>
 
                 <Card title="Symptom check-ins">
                   <p className="mb-3 text-xs text-slate-400">
-                    Markers identify self-reported symptom dates only; they do not imply a relationship with a measurement.
+                    Markers identify self-reported symptom dates only; they do not imply a causal relationship with an instrument or laboratory measurement.
                   </p>
                   {visibleCheckIns.filter((checkIn) => checkIn.symptoms.length > 0).length === 0 ? (
                     <EmptyState>No symptom check-ins are recorded in this time range.</EmptyState>
@@ -446,9 +538,9 @@ export function TrendsPage() {
             ) : (
               <Card
                 title="Mission Timeline"
-                subtitle="Personal measurements, daily check-ins, and saved mission context for the selected range, grouped by mission day when a start date is available."
+                subtitle="Personal measurements, episodic lab draws, daily check-ins, and saved mission context for the selected range, grouped by mission day."
               >
-                <Alert kind="info">Events are shown together, not as cause and effect.</Alert>
+                <Alert kind="info">Events are shown together chronologically, not as cause and effect.</Alert>
                 {filteredTimeline.length === 0 ? (
                   <EmptyState>No personal measurements, check-ins, or mission context events are available in this range.</EmptyState>
                 ) : (
@@ -458,7 +550,7 @@ export function TrendsPage() {
                         <h2 className="border-b border-slate-800 pb-2 text-sm font-semibold text-cyan-200">{group.label}</h2>
                         <ol className="divide-y divide-slate-800">
                           {group.events.map((event) => (
-                            <li key={event.id} className="grid gap-1 py-3 sm:grid-cols-[10rem_1fr]">
+                            <li key={event.id} className="grid gap-1 py-3 sm:grid-cols-[11rem_1fr]">
                               <time className="text-xs text-slate-400">
                                 {new Date(event.date).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
                               </time>

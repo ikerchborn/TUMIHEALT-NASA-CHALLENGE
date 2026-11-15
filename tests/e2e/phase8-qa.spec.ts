@@ -251,3 +251,79 @@ test('Welcome shows the shared 2D illustration and a single start action', async
     });
   }
 });
+
+test('final UX improvements: welcome title & 6 team cards, one-click 90d demo, explainable overview, trends, indicator details, and import flow', async ({ page }) => {
+  const screenshotsDir = resolve(process.cwd(), 'docs', 'screenshots');
+  mkdirSync(screenshotsDir, { recursive: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // 1. Welcome page & 6 team member cards
+  await page.goto('/welcome');
+  await expect(page.getByRole('heading', { name: 'TUMI-HEALT · Astronaut Health System' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your health. Your mission.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'The Team Behind TUMI-HEALT' })).toBeVisible();
+  await expect(page.getByTestId('team-member-card')).toHaveCount(6);
+
+  await page.screenshot({
+    path: resolve(screenshotsDir, '01-welcome-page.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
+
+  const teamSection = page.locator('section', { hasText: 'The Team Behind TUMI-HEALT' });
+  await teamSection.screenshot({
+    path: resolve(screenshotsDir, '06-six-team-member-cards.png'),
+    animations: 'disabled',
+  });
+
+  // 2. One-click Explore with a demo astronaut -> Main health overview with 90-day synthetic data
+  await page.getByRole('button', { name: 'Explore with a demo astronaut' }).click();
+  await expect(page).toHaveURL('http://127.0.0.1:4173/');
+  await expect(page.getByRole('button', { name: 'Exit Demo' }).first()).toBeVisible();
+  await expect(page.getByTestId('observation-detail-card').first()).toBeVisible();
+
+  await page.screenshot({
+    path: resolve(screenshotsDir, '02-health-overview-synthetic-90d.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
+
+  // 3. 90-day timeline & trends
+  await page.goto('/trends');
+  await expect(page.getByRole('heading', { name: /My Health Trends/ })).toBeVisible();
+  await expect(page.locator('.recharts-surface').first()).toBeVisible();
+
+  await page.screenshot({
+    path: resolve(screenshotsDir, '03-90d-timeline.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
+
+  // 4. Indicator details (/guides)
+  await page.goto('/guides');
+  await expect(page.getByRole('heading', { name: 'Health Guides' })).toBeVisible();
+  await expect(page.getByText(/Supports 90-Day Personal Baseline/)).toBeVisible();
+
+  await page.screenshot({
+    path: resolve(screenshotsDir, '04-indicator-details.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
+
+  // 5. Import process with auto-detected category & indicator badges
+  await page.getByRole('button', { name: 'Exit Demo' }).first().click();
+  await createPersonalProfile(page);
+  await page.goto('/import');
+  await page.locator('input[type="file"]').setInputFiles(
+    resolve(process.cwd(), 'data', 'synthetic', 'tumi_synthetic_90d_sleep.csv'),
+  );
+  await expect(page.getByRole('heading', { name: /2 · Column Mapping/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Validate & Preview' }).click();
+  await expect(page.getByText('Valid: 135')).toBeVisible();
+
+  await page.screenshot({
+    path: resolve(screenshotsDir, '05-import-process.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
+});

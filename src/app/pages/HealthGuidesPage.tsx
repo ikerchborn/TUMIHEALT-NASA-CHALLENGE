@@ -205,8 +205,8 @@ export function HealthGuidesPage() {
 
           {guideError && <Alert kind="error">Could not load personal reading details: {guideError}</Alert>}
 
-          <div className="grid gap-6 lg:grid-cols-[300px_1fr]">
-            <div className="space-y-2.5">
+          <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+            <div className="max-h-[680px] space-y-2.5 overflow-y-auto pr-1">
               {filtered.map((item) => {
                 const isSelected = item.indicator_id === current.indicator_id;
                 const meta = CATEGORY_INFO[item.category];
@@ -224,11 +224,14 @@ export function HealthGuidesPage() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-semibold text-white">{item.name}</span>
-                      <span className={`rounded-pill border px-2.5 py-1 text-sm font-medium ${meta.badge}`}>
+                      <span className={`rounded-pill border px-2.5 py-1 text-xs font-medium ${meta.badge}`}>
                         {meta.label}
                       </span>
                     </div>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-300">{item.definition}</p>
+                    <p className="mt-1 font-mono text-xs text-cyan-300">
+                      {item.indicator_id} · {item.measurement_unit}
+                    </p>
+                    <p className="mt-1.5 text-sm leading-relaxed text-slate-300">{item.definition}</p>
                   </button>
                 );
               })}
@@ -242,8 +245,18 @@ export function HealthGuidesPage() {
             <div className="space-y-4">
               <Card
                 title={current.name}
-                subtitle={`Category: ${catMeta.label} · Standard unit: ${current.measurement_unit}`}
+                subtitle={`Category: ${catMeta.label} · Standard unit: ${current.measurement_unit} · Identifier: ${current.indicator_id}`}
               >
+                <div className="mb-4 flex flex-wrap gap-2 text-xs">
+                  <span className="rounded-md border border-cyan-500/40 bg-cyan-950/60 px-2.5 py-1 font-semibold text-cyan-200">
+                    Type: {(current.information_type ?? 'laboratory_result').replaceAll('_', ' ')}
+                  </span>
+                  <span className="rounded-md border border-emerald-500/40 bg-emerald-950/50 px-2.5 py-1 font-semibold text-emerald-200">
+                    {current.supports_trend_analysis !== false
+                      ? 'Supports 90-Day Personal Baseline & Trend Analysis'
+                      : 'Point-in-time reference'}
+                  </span>
+                </div>
                 <h3 className="text-base font-semibold text-white">In simple terms</h3>
                 <p className="mt-2 text-base leading-relaxed text-slate-200">{current.definition}</p>
                 <h3 className="mt-5 text-base font-semibold text-white">Why it matters</h3>

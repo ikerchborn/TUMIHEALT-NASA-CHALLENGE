@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  buildSynthetic90DayCsvFiles,
   cancelCsvImport,
   confirmCsvImport,
   decodeUtf8Text,
@@ -40,14 +41,63 @@ import { Alert, Button, Card, EmptyState, Field, PageHeader, StepProgress, input
 type RequiredField = 'timestamp' | 'indicator' | 'value' | 'unit';
 const required: RequiredField[] = ['timestamp', 'indicator', 'value', 'unit'];
 
-function guessMapping(headers: string[]): Partial<Record<RequiredField, string>> {
+const KNOWN_OPTIONAL_COLUMNS: readonly (keyof CsvColumnMapping)[] = [
+  'sample_id',
+  'specimen_type',
+  'assay',
+  'sleep_start',
+  'sleep_end',
+  'sleep_duration',
+  'sleep_efficiency',
+  'sleep_latency',
+  'heart_rate',
+  'systolic_blood_pressure',
+  'diastolic_blood_pressure',
+  'cardiac_output',
+  'activity_context',
+  'sleep_state',
+  'device_id',
+  'quality_status',
+];
+
+function guessMapping(headers: string[]): Partial<CsvColumnMapping> {
   const find = (...names: string[]) => headers.find((h) => names.includes(h.trim().toLowerCase()));
-  return {
+  const mapped: Partial<CsvColumnMapping> = {
     timestamp: find('timestamp', 'date', 'datetime', 'fecha'),
     indicator: find('indicator', 'variable', 'analyte', 'indicador'),
     value: find('value', 'result', 'valor'),
     unit: find('unit', 'units', 'unidad'),
   };
+  for (const opt of KNOWN_OPTIONAL_COLUMNS) {
+    const match = find(opt);
+    if (match) {
+      mapped[opt] = match;
+    }
+  }
+  return mapped;
+}
+
+function detectCategoryFromRows(
+  rows: readonly Record<string, string>[],
+  indicatorCol?: string,
+): HealthCategory | null {
+  if (!indicatorCol) return null;
+  const distinct = Array.from(
+    new Set(
+      rows
+        .map((r) => (r[indicatorCol] ?? '').trim().toLowerCase())
+        .filter((v) => v.length > 0),
+    ),
+  );
+  if (distinct.length === 0) return null;
+  const categories: HealthCategory[] = ['blood', 'sleep', 'cardiovascular'];
+  for (const cat of categories) {
+    const registry = INDICATOR_UNIT_REGISTRY[cat];
+    if (distinct.every((ind) => ind in registry)) {
+      return cat;
+    }
+  }
+  return null;
 }
 
 function toCsvFileName(originalName: string, sheetName: string): string {
@@ -158,8 +208,9 @@ export function ImportPage() {
   const [xmlRecordLocations, setXmlRecordLocations] = useState<Record<number, XmlRecordLocation>>({});
   const [csvText, setCsvText] = useState('');
   const [inspection, setInspection] = useState<CsvInspectionResult | null>(null);
-  const [mapping, setMapping] = useState<Partial<Record<RequiredField, string>>>({});
+  const [mapping, setMapping] = useState<Partial<CsvColumnMapping>>({});
   const [category, setCategory] = useState<HealthCategory>('blood');
+  const [autoDetectedNote, setAutoDetectedNote] = useState<string | null>(null);
   const [origin, setOrigin] = useState<DataOrigin>('GROUND_ANALOG');
   const [sourceDataset, setSourceDataset] = useState('');
   const [preview, setPreview] = useState<CsvImportPreview | null>(null);
@@ -193,13 +244,47 @@ export function ImportPage() {
   function loadSheet(fileName: string, sheet: ExtractedSheetCsv) {
     const normalizedName = toCsvFileName(fileName, sheet.sheetName);
     const info = inspectCsvFile(sheet.csvText, normalizedName);
+    const guessed = guessMapping(info.headers);
     setCsvText(sheet.csvText);
     setInspection(info);
-    setMapping(guessMapping(info.headers));
+    setMapping(guessed);
     setSourceDataset(fileName.replace(/\.(csv|xml|xlsx|xls)$/i, ''));
+    const detectedCat = detectCategoryFromRows(info.sample_rows, guessed.indicator);
+    if (detectedCat && detectedCat !== category) {
+      setCategory(detectedCat);
+      setAutoDetectedNote(
+        `Auto-detected category "${detectedCat}" from indicator values in "${fileName}".`,
+      );
+    } else {
+      setAutoDetectedNote(null);
+    }
     setPreview(null);
     setImportedBatch(null);
     setImportedRecords([]);
+  }
+
+  function downloadSynthetic90dCsv(targetCategory: HealthCategory) {
+    try {
+      const files = buildSynthetic90DayCsvFiles(active?.astronaut_id ?? 'astro-01');
+      const map: Record<HealthCategory, { name: string; content: string }> = {
+        blood: {
+          name: 'tumi_synthetic_90d_blood.csv',
+          content: files.bloodCsv,
+        },
+        sleep: {
+          name: 'tumi_synthetic_90d_sleep.csv',
+          content: files.sleepCsv,
+        },
+        cardiovascular: {
+          name: 'tumi_synthetic_90d_cardiovascular.csv',
+          content: files.cardiovascularCsv,
+        },
+      };
+      const chosen = map[targetCategory];
+      downloadFile(chosen.name, chosen.content, 'text/csv;charset=utf-8');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   useEffect(() => {
@@ -488,6 +573,25 @@ export function ImportPage() {
             <Button variant="ghost" onClick={() => downloadTemplate('xml')}>Download XML template</Button>
             <Button variant="ghost" onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
           </div>
+          <div className="mt-4 rounded-xl border border-violet-500/35 bg-violet-950/25 p-3.5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-violet-300">
+              90-Day Synthetic Astronaut Datasets (Import-Ready CSVs · data/synthetic/)
+            </p>
+            <p className="mt-1 text-xs text-slate-300">
+              Download complete 90-day synthetic timelines grounded in NASA OSDR OSD-569 (CBC), OSD-575 (CMP), UTMB Campaign 1 (Sleep), and Apollo AP005 (Cardiovascular) to test multi-indicator import:
+            </p>
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('blood')}>
+                Download 90d Blood CSV (140 rows · 24 CBC/CMP biomarkers)
+              </Button>
+              <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('sleep')}>
+                Download 90d Sleep CSV (135 rows · 3 sleep indicators)
+              </Button>
+              <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('cardiovascular')}>
+                Download 90d Cardiovascular &amp; Vitals CSV (320 rows · 8 indicators)
+              </Button>
+            </div>
+          </div>
         </Card>
 
         <Card title="1 · File & Context">
@@ -516,6 +620,11 @@ export function ImportPage() {
               </select>
             </Field>
           </div>
+          {autoDetectedNote && (
+            <div className="mt-3">
+              <Alert kind="info">{autoDetectedNote}</Alert>
+            </div>
+          )}
           {sheets.length > 1 && (
             <div className="mt-4 max-w-sm">
               <Field label="Excel Sheet">
@@ -546,6 +655,70 @@ export function ImportPage() {
 
         {inspection && (
           <Card title={`2 · Column Mapping (${inspection.total_rows} rows)`}>
+            {/* Auto-detected Format, Indicators & Columns Summary */}
+            <div className="mb-4 grid gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 text-xs sm:grid-cols-3">
+              <div>
+                <span className="font-semibold uppercase tracking-wider text-slate-400">
+                  Detected Format &amp; Rows
+                </span>
+                <p className="mt-1 font-mono text-sm font-semibold text-cyan-300">
+                  {fileFormat.toUpperCase()} · {inspection.total_rows} row{inspection.total_rows === 1 ? '' : 's'}
+                </p>
+              </div>
+              <div>
+                <span className="font-semibold uppercase tracking-wider text-slate-400">
+                  Detected Indicators in Sample
+                </span>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {(() => {
+                    const indCol = mapping.indicator;
+                    const sampleInds = indCol
+                      ? Array.from(
+                          new Set(
+                            inspection.sample_rows
+                              .map((r) => (r[indCol] ?? '').trim().toLowerCase())
+                              .filter(Boolean),
+                          ),
+                        )
+                      : [];
+                    if (sampleInds.length === 0) {
+                      return <span className="text-slate-400">Select an indicator column</span>;
+                    }
+                    return sampleInds.map((ind) => {
+                      const units = INDICATOR_UNIT_REGISTRY[category][ind];
+                      return (
+                        <span
+                          key={ind}
+                          className={`rounded-md border px-2 py-0.5 font-mono ${
+                            units
+                              ? 'border-emerald-600/50 bg-emerald-950/50 text-emerald-200'
+                              : 'border-rose-600/50 bg-rose-950/50 text-rose-200'
+                          }`}
+                        >
+                          {ind} {units ? `(${units.join('/')})` : '(unsupported)'}
+                        </span>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+              <div>
+                <span className="font-semibold uppercase tracking-wider text-slate-400">
+                  Optional &amp; Extra Columns
+                </span>
+                <p className="mt-1 text-slate-300">
+                  {(() => {
+                    const mappedSet = new Set(Object.values(mapping).filter(Boolean));
+                    const unmapped = inspection.headers.filter((h) => !mappedSet.has(h));
+                    const optCount = KNOWN_OPTIONAL_COLUMNS.filter((k) => Boolean(mapping[k])).length;
+                    return `${optCount} metadata column(s) auto-mapped${
+                      unmapped.length > 0 ? ` · Unmapped: ${unmapped.join(', ')}` : ''
+                    }`;
+                  })()}
+                </p>
+              </div>
+            </div>
+
             <div className="grid gap-4 md:grid-cols-5">
               {required.map((f) => (
                 <Field key={f} label={f}>
