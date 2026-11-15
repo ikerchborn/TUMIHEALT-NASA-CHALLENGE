@@ -4,6 +4,7 @@ export * from './sleep';
 export * from './cardiovascular';
 export * from './audit';
 export * from './ingestion';
+export * from './scientific';
 
 import type { BloodRecord, BloodRecordInput } from './blood';
 import type { SleepRecord, SleepRecordInput } from './sleep';

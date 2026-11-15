@@ -104,7 +104,13 @@ export async function deleteProfile(astronautId: string): Promise<{
 
   return db.transaction(
     'rw',
-    [db.profiles, db.blood_records, db.sleep_records, db.cardiovascular_records],
+    [
+      db.profiles,
+      db.blood_records,
+      db.sleep_records,
+      db.cardiovascular_records,
+      db.mission_contexts,
+    ],
     async () => {
       const existing = await db.profiles.get(astronautId);
       const bloodCount = await db.blood_records
@@ -119,6 +125,7 @@ export async function deleteProfile(astronautId: string): Promise<{
         .where('astronaut_id')
         .equals(astronautId)
         .delete();
+      await db.mission_contexts.where('astronaut_id').equals(astronautId).delete();
 
       if (existing) {
         await db.profiles.delete(astronautId);
