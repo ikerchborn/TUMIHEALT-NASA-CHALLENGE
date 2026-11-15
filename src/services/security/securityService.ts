@@ -1,6 +1,16 @@
-import type { DataOrigin, HealthRecord, LocalBackupPayload } from '@/types';
+import type {
+  AuditEvent,
+  DataOrigin,
+  HealthRecord,
+  HealthRecordInput,
+  ImportBatch,
+  LocalAstronautProfile,
+  LocalBackupPayload,
+  MissionContext,
+} from '@/types';
 import { recordAuditEvent } from '@/services/audit';
 import { initializeDatabase } from '@/services/storage/db';
+import { validateHealthRecordInput } from '@/services/validation';
 
 export const MAX_CSV_FILE_BYTES = 5 * 1024 * 1024; // 5 MiB safety limit
 
@@ -173,15 +183,135 @@ export async function exportLocalBackup(
   };
 }
 
+const SUPPORTED_BACKUP_VERSIONS = new Set([1, 2, 3]);
+
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validateBackupPayloadStructure(payload: LocalBackupPayload): void {
+  if (!isRecordObject(payload)) {
+    throw new Error('Invalid backup payload: expected an object.');
+  }
+  if (!SUPPORTED_BACKUP_VERSIONS.has(payload.schema_version)) {
+    throw new Error(
+      `Unsupported backup schema_version "${String(payload.schema_version)}". Supported versions: 1, 2, 3.`,
+    );
+  }
+
+  const requiredArrays: Array<keyof LocalBackupPayload> = [
+    'profiles',
+    'blood_records',
+    'sleep_records',
+    'cardiovascular_records',
+    'mission_contexts',
+    'import_batches',
+    'audit_events',
+  ];
+  for (const key of requiredArrays) {
+    if (!Array.isArray(payload[key])) {
+      throw new Error(`Invalid backup payload: "${key}" must be an array.`);
+    }
+  }
+
+  for (const profile of payload.profiles) {
+    if (
+      !isRecordObject(profile) ||
+      typeof profile.astronaut_id !== 'string' ||
+      !profile.astronaut_id.trim() ||
+      typeof profile.display_name !== 'string' ||
+      !profile.display_name.trim()
+    ) {
+      throw new Error('Invalid backup payload: malformed astronaut profile entry.');
+    }
+  }
+
+  const categoryArrays: Array<{
+    expectedCategory: 'blood' | 'sleep' | 'cardiovascular';
+    items: unknown[];
+  }> = [
+    { expectedCategory: 'blood', items: payload.blood_records },
+    { expectedCategory: 'sleep', items: payload.sleep_records },
+    { expectedCategory: 'cardiovascular', items: payload.cardiovascular_records },
+  ];
+
+  for (const { expectedCategory, items } of categoryArrays) {
+    for (const item of items) {
+      if (
+        !isRecordObject(item) ||
+        typeof item.id !== 'string' ||
+        !item.id.trim() ||
+        item.category !== expectedCategory
+      ) {
+        throw new Error(
+          `Invalid backup payload: malformed ${expectedCategory} record entry.`,
+        );
+      }
+      const validation = validateHealthRecordInput(
+        item as unknown as HealthRecordInput,
+      );
+      if (!validation.valid) {
+        throw new Error(
+          `Invalid backup payload: ${expectedCategory} record "${item.id}" failed schema validation (${validation.errors[0]?.message ?? 'unknown error'}).`,
+        );
+      }
+    }
+  }
+
+  for (const ctx of payload.mission_contexts) {
+    if (
+      !isRecordObject(ctx) ||
+      typeof ctx.context_id !== 'string' ||
+      !ctx.context_id.trim() ||
+      typeof ctx.astronaut_id !== 'string' ||
+      !ctx.astronaut_id.trim() ||
+      typeof ctx.mission_id !== 'string' ||
+      !ctx.mission_id.trim()
+    ) {
+      throw new Error('Invalid backup payload: malformed mission_context entry.');
+    }
+  }
+
+  for (const batch of payload.import_batches) {
+    if (
+      !isRecordObject(batch) ||
+      typeof batch.batch_id !== 'string' ||
+      !batch.batch_id.trim() ||
+      typeof batch.profile_id !== 'string' ||
+      !batch.profile_id.trim()
+    ) {
+      throw new Error('Invalid backup payload: malformed import_batch entry.');
+    }
+  }
+
+  for (const evt of payload.audit_events) {
+    if (
+      !isRecordObject(evt) ||
+      typeof evt.event_id !== 'string' ||
+      !evt.event_id.trim() ||
+      typeof evt.profile_id !== 'string' ||
+      !evt.profile_id.trim() ||
+      typeof evt.action !== 'string' ||
+      typeof evt.timestamp !== 'string'
+    ) {
+      throw new Error('Invalid backup payload: malformed audit_event entry.');
+    }
+  }
+}
+
 /**
- * Restores a previously exported local backup after verifying its SHA-256 checksum.
- * Uses `bulkPut` only when `overwriteExisting` is true; otherwise uses `bulkAdd`
- * (or skips existing keys) to prevent silent overwrites.
+ * Restores a previously exported local backup after verifying its SHA-256
+ * checksum and validating every record schema before writing to IndexedDB.
+ *
+ * Note: SHA-256 verifies payload integrity only; it does not provide
+ * encryption or cryptographic authentication.
  */
 export async function restoreLocalBackup(
   payload: LocalBackupPayload,
   options: { overwriteExisting?: boolean } = {},
 ): Promise<{ restoredRecords: number }> {
+  validateBackupPayloadStructure(payload);
+
   const { checksum_sha256, ...body } = payload;
   const expectedChecksum = await computeSha256Hex(JSON.stringify(body));
   if (checksum_sha256 !== expectedChecksum) {
@@ -191,6 +321,23 @@ export async function restoreLocalBackup(
   const db = await initializeDatabase();
   const overwrite = options.overwriteExisting ?? false;
 
+  const profiles = payload.profiles as LocalAstronautProfile[];
+  const bloodRecords = payload.blood_records as Extract<
+    HealthRecord,
+    { category: 'blood' }
+  >[];
+  const sleepRecords = payload.sleep_records as Extract<
+    HealthRecord,
+    { category: 'sleep' }
+  >[];
+  const cardioRecords = payload.cardiovascular_records as Extract<
+    HealthRecord,
+    { category: 'cardiovascular' }
+  >[];
+  const missionContexts = payload.mission_contexts as MissionContext[];
+  const importBatches = payload.import_batches as ImportBatch[];
+  const auditEvents = payload.audit_events as AuditEvent[];
+
   await db.transaction(
     'rw',
     [
@@ -199,44 +346,52 @@ export async function restoreLocalBackup(
       db.sleep_records,
       db.cardiovascular_records,
       db.mission_contexts,
+      db.import_batches,
+      db.audit_events,
     ],
     async () => {
       if (overwrite) {
-        if (payload.profiles.length) await db.profiles.bulkPut(payload.profiles as never[]);
-        if (payload.blood_records.length)
-          await db.blood_records.bulkPut(payload.blood_records as never[]);
-        if (payload.sleep_records.length)
-          await db.sleep_records.bulkPut(payload.sleep_records as never[]);
-        if (payload.cardiovascular_records.length)
-          await db.cardiovascular_records.bulkPut(
-            payload.cardiovascular_records as never[],
-          );
-        if (payload.mission_contexts.length)
-          await db.mission_contexts.bulkPut(payload.mission_contexts as never[]);
+        if (profiles.length) await db.profiles.bulkPut(profiles);
+        if (bloodRecords.length) await db.blood_records.bulkPut(bloodRecords);
+        if (sleepRecords.length) await db.sleep_records.bulkPut(sleepRecords);
+        if (cardioRecords.length) await db.cardiovascular_records.bulkPut(cardioRecords);
+        if (missionContexts.length) await db.mission_contexts.bulkPut(missionContexts);
+        if (importBatches.length) await db.import_batches.bulkPut(importBatches);
+        if (auditEvents.length) await db.audit_events.bulkPut(auditEvents);
       } else {
-        for (const p of payload.profiles as Array<{ astronaut_id: string }>) {
+        for (const p of profiles) {
           if (!(await db.profiles.get(p.astronaut_id))) {
-            await db.profiles.add(p as never);
+            await db.profiles.add(p);
           }
         }
-        for (const r of payload.blood_records as Array<{ id: string }>) {
+        for (const r of bloodRecords) {
           if (!(await db.blood_records.get(r.id))) {
-            await db.blood_records.add(r as never);
+            await db.blood_records.add(r);
           }
         }
-        for (const r of payload.sleep_records as Array<{ id: string }>) {
+        for (const r of sleepRecords) {
           if (!(await db.sleep_records.get(r.id))) {
-            await db.sleep_records.add(r as never);
+            await db.sleep_records.add(r);
           }
         }
-        for (const r of payload.cardiovascular_records as Array<{ id: string }>) {
+        for (const r of cardioRecords) {
           if (!(await db.cardiovascular_records.get(r.id))) {
-            await db.cardiovascular_records.add(r as never);
+            await db.cardiovascular_records.add(r);
           }
         }
-        for (const c of payload.mission_contexts as Array<{ context_id: string }>) {
+        for (const c of missionContexts) {
           if (!(await db.mission_contexts.get(c.context_id))) {
-            await db.mission_contexts.add(c as never);
+            await db.mission_contexts.add(c);
+          }
+        }
+        for (const b of importBatches) {
+          if (!(await db.import_batches.get(b.batch_id))) {
+            await db.import_batches.add(b);
+          }
+        }
+        for (const e of auditEvents) {
+          if (!(await db.audit_events.get(e.event_id))) {
+            await db.audit_events.add(e);
           }
         }
       }
@@ -245,8 +400,6 @@ export async function restoreLocalBackup(
 
   return {
     restoredRecords:
-      payload.blood_records.length +
-      payload.sleep_records.length +
-      payload.cardiovascular_records.length,
+      bloodRecords.length + sleepRecords.length + cardioRecords.length,
   };
 }

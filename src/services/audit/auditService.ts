@@ -15,6 +15,32 @@ function generateEventId(): string {
   return `evt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+const REDACTED_DETAIL_KEYS = new Set([
+  'value',
+  'previous_values',
+  'new_values',
+  'deleted_record_snapshot',
+  'heart_rate',
+  'blood_pressure',
+  'cardiac_output',
+  'sleep_duration',
+  'sleep_efficiency',
+  'sleep_latency',
+]);
+
+function sanitizeAuditDetails(
+  details: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!details) return {};
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(details)) {
+    if (!REDACTED_DETAIL_KEYS.has(key)) {
+      sanitized[key] = val;
+    }
+  }
+  return sanitized;
+}
+
 export interface RecordAuditEventInput {
   record_id?: string;
   profile_id: string;
@@ -47,7 +73,7 @@ export async function recordAuditEvent(
     data_origin: input.data_origin,
     category: input.category,
     status: input.status,
-    details: input.details ?? {},
+    details: sanitizeAuditDetails(input.details),
   };
 
   await db.audit_events.add(event);

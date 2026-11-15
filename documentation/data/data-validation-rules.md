@@ -18,6 +18,7 @@ Validation (`src/services/validation/recordValidator.ts`) enforces **technical c
 
 - Known indicators in `INDICATOR_UNIT_REGISTRY` (`src/services/validation/unitRegistry.ts`) accept only their registered units (e.g., `heart_rate` -> `bpm`, `sleep_efficiency` -> `%`, `cardiac_output` -> `L/min`).
 - Incompatible units are **rejected** with `INCOMPATIBLE_UNIT` and are **never silently converted**.
+- Known source-dataset unit discrepancies (such as `OSD-569` `hemoglobin` labeled with `%` and `unit_label_requires_verification`) are **rejected** with `AMBIGUOUS_SOURCE_UNIT` until verified, without converting `%` to `g/dL`.
 - `validateUnitConsistency(records)` ensures analytics never mix incompatible units for the same indicator.
 
 ## Category-Specific Rules

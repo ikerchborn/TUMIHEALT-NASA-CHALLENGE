@@ -17,6 +17,8 @@ export interface ImportBatch {
   profile_id: string;
   category: HealthCategory;
   file_name: string;
+  content_hash?: string;
+  is_duplicate_of_batch_id?: string;
   data_origin: DataOrigin;
   source_dataset: string;
   status: ImportBatchStatus;

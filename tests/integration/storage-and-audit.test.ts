@@ -126,8 +126,10 @@ describe('IndexedDB Storage, Persistence, Profile Separation, and Audit Trail', 
     const bloodAudit = await getRecordAuditHistory(blood.id);
     const updateEvt = bloodAudit.find((e) => e.action === 'RECORD_UPDATED');
     expect(updateEvt).toBeDefined();
-    expect((updateEvt?.details.previous_values as { value: number }).value).toBe(4.5);
-    expect((updateEvt?.details.new_values as { value: number }).value).toBe(4.7);
+    expect(updateEvt?.details.changed_fields).toEqual(['value']);
+    expect(updateEvt?.details.previous_values).toBeUndefined();
+    expect(updateEvt?.details.new_values).toBeUndefined();
+    expect(updateEvt?.details.value).toBeUndefined();
 
     const sleepOnly = await getRecords({
       astronaut_id: 'astro-01',

@@ -14,7 +14,10 @@ import { recordAuditEvent } from '@/services/audit';
 import { initializeDatabase } from '@/services/storage/db';
 import { insertRecord } from '@/services/storage/recordStorage';
 import { validateHealthRecordInput } from '@/services/validation';
-import { validateCsvUploadConstraints } from '@/services/security';
+import {
+  computeSha256Hex,
+  validateCsvUploadConstraints,
+} from '@/services/security';
 import { parseCsv } from './csvParser';
 
 const MISSING_MARKERS = new Set(['', 'NA', 'N/A', 'NULL', 'NONE', 'NOT_AVAILABLE']);
@@ -100,6 +103,7 @@ export async function prepareCsvImportPreview(params: {
   sourceDataset: string;
   mapping: CsvColumnMapping;
   actorId?: string;
+  allowDuplicate?: boolean;
 }): Promise<CsvImportPreview> {
   const uploadCheck = validateCsvUploadConstraints(
     params.fileName,
@@ -109,6 +113,39 @@ export async function prepareCsvImportPreview(params: {
     throw new Error(uploadCheck.error);
   }
   const db = await initializeDatabase();
+  const normalizedCsv = params.csvText.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').trim();
+  const contentHash = await computeSha256Hex(normalizedCsv);
+
+  const existingBatches = await db.import_batches
+    .where('profile_id')
+    .equals(params.profileId)
+    .toArray();
+  const duplicateBatch = existingBatches.find(
+    (b) =>
+      b.category === params.category &&
+      b.content_hash === contentHash &&
+      (b.status === 'confirmed' || b.status === 'partially_confirmed'),
+  );
+
+  if (duplicateBatch && !params.allowDuplicate) {
+    await recordAuditEvent({
+      profile_id: params.profileId,
+      actor_id: params.actorId ?? params.profileId,
+      action: 'IMPORT_FAILED',
+      data_origin: params.dataOrigin,
+      category: params.category,
+      status: 'failure',
+      details: {
+        file_name: params.fileName,
+        content_hash: contentHash,
+        duplicate_of_batch_id: duplicateBatch.batch_id,
+        reason: 'Duplicate CSV content detected for this profile and category.',
+      },
+    });
+    throw new Error(
+      `Duplicate CSV import blocked: identical content was already imported in batch "${duplicateBatch.batch_id}".`,
+    );
+  }
   const { headers, rows } = parseCsv(params.csvText);
   const batchId = generateBatchId();
   const now = new Date().toISOString();
@@ -287,6 +324,8 @@ export async function prepareCsvImportPreview(params: {
     profile_id: params.profileId,
     category: params.category,
     file_name: params.fileName,
+    content_hash: contentHash,
+    is_duplicate_of_batch_id: duplicateBatch?.batch_id,
     data_origin: params.dataOrigin,
     source_dataset: params.sourceDataset,
     status: 'pending_confirmation',
@@ -359,8 +398,8 @@ export async function confirmCsvImport(
         ingestion_method: 'CSV_IMPORT',
         import_batch_id: preview.batch.batch_id,
         indicator: saved.indicator,
-        value: saved.value,
         unit: saved.unit,
+        measurement_timestamp: saved.timestamp,
       },
     });
   }

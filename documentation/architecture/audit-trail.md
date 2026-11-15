@@ -21,7 +21,8 @@ Each `AuditEvent` contains:
 
 ## Audit Rules
 
-- **Modifications (`RECORD_UPDATED`):** Preserve both `previous_values` and `new_values` in `details`.
+- **Data Minimization:** Raw biometric measurement values (`value`, `previous_values`, `new_values`) are redacted from `audit_events.details`; events record identifiers, `changed_fields`, `indicator`, `unit`, and timestamps.
+- **Modifications (`RECORD_UPDATED`):** Record `changed_fields`, `indicator`, and `unit` without storing raw measurement values.
 - **Deletions (`RECORD_DELETED`, `PROFILE_DELETED`):** The audit event is written **before** removing the record or profile from IndexedDB.
 - **CSV Imports:** Tracks validation (`IMPORT_VALIDATED`), confirmation (`IMPORT_CONFIRMED`), cancellation (`IMPORT_CANCELLED`), failures (`IMPORT_FAILED`), and per-record creation (`RECORD_CREATED`).
 

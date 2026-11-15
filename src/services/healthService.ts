@@ -59,6 +59,15 @@ function assertValidInput(input: HealthRecordInput): void {
   }
 }
 
+async function assertProfileExists(astronautId: string): Promise<void> {
+  const profile = await getProfile(astronautId);
+  if (!profile) {
+    throw new Error(
+      `Profile validation failed: astronaut profile "${astronautId}" does not exist.`,
+    );
+  }
+}
+
 /**
  * Saves a manually entered blood biomarker measurement after validation and
  * records a `RECORD_CREATED` audit event.
@@ -73,6 +82,7 @@ export async function saveBloodMeasurement(
     ingestion_method: input.ingestion_method ?? 'MANUAL',
   };
   assertValidInput(fullInput);
+  await assertProfileExists(fullInput.astronaut_id);
 
   const saved = await insertRecord(fullInput);
   await recordAuditEvent({
@@ -86,8 +96,8 @@ export async function saveBloodMeasurement(
     details: {
       ingestion_method: saved.ingestion_method,
       indicator: saved.indicator,
-      value: saved.value,
       unit: saved.unit,
+      measurement_timestamp: saved.timestamp,
     },
   });
   return saved;
@@ -107,6 +117,7 @@ export async function saveSleepMeasurement(
     ingestion_method: input.ingestion_method ?? 'MANUAL',
   };
   assertValidInput(fullInput);
+  await assertProfileExists(fullInput.astronaut_id);
 
   const saved = await insertRecord(fullInput);
   await recordAuditEvent({
@@ -120,8 +131,8 @@ export async function saveSleepMeasurement(
     details: {
       ingestion_method: saved.ingestion_method,
       indicator: saved.indicator,
-      value: saved.value,
       unit: saved.unit,
+      measurement_timestamp: saved.timestamp,
     },
   });
   return saved;
@@ -141,6 +152,7 @@ export async function saveCardiovascularMeasurement(
     ingestion_method: input.ingestion_method ?? 'MANUAL',
   };
   assertValidInput(fullInput);
+  await assertProfileExists(fullInput.astronaut_id);
 
   const saved = await insertRecord(fullInput);
   await recordAuditEvent({
@@ -154,8 +166,8 @@ export async function saveCardiovascularMeasurement(
     details: {
       ingestion_method: saved.ingestion_method,
       indicator: saved.indicator,
-      value: saved.value,
       unit: saved.unit,
+      measurement_timestamp: saved.timestamp,
     },
   });
   return saved;
@@ -205,18 +217,35 @@ export async function getDataQualitySummary(
 }
 
 /**
- * Updates an existing health record after validating the resulting state.
- * Preserves previous and new values in a `RECORD_UPDATED` audit event.
+ * Updates an existing health record after verifying profile ownership and
+ * validating the resulting state. Logs only changed field names (no raw values).
  */
 export async function updateRecord(
   id: string,
   category: HealthCategory,
   updates: Partial<Omit<HealthRecord, 'id' | 'category' | 'created_at'>>,
   actorId?: string,
+  expectedProfileId?: string,
 ): Promise<HealthRecord> {
   const existing = await getRecordById(id, category);
   if (!existing) {
     throw new Error(`Record "${id}" not found in category "${category}".`);
+  }
+
+  await assertProfileExists(existing.astronaut_id);
+
+  if (expectedProfileId && existing.astronaut_id !== expectedProfileId) {
+    throw new Error(
+      `Cross-profile access denied: record "${id}" does not belong to profile "${expectedProfileId}".`,
+    );
+  }
+  if (
+    updates.astronaut_id !== undefined &&
+    updates.astronaut_id !== existing.astronaut_id
+  ) {
+    throw new Error(
+      'Cross-profile reassignment is not allowed when updating a health record.',
+    );
   }
 
   const mergedCandidate = {
@@ -237,8 +266,9 @@ export async function updateRecord(
     category: updated.category,
     status: 'success',
     details: {
-      previous_values: existing,
-      new_values: updated,
+      changed_fields: Object.keys(updates).sort(),
+      indicator: updated.indicator,
+      unit: updated.unit,
     },
   });
 
@@ -246,17 +276,26 @@ export async function updateRecord(
 }
 
 /**
- * Deletes a single health record.
+ * Deletes a single health record after verifying profile ownership.
  * Records the `RECORD_DELETED` audit event BEFORE removing the record from IndexedDB.
  */
 export async function deleteRecord(
   id: string,
   category?: HealthCategory,
   actorId?: string,
+  expectedProfileId?: string,
 ): Promise<boolean> {
   const existing = await getRecordById(id, category);
   if (!existing) {
     return false;
+  }
+
+  await assertProfileExists(existing.astronaut_id);
+
+  if (expectedProfileId && existing.astronaut_id !== expectedProfileId) {
+    throw new Error(
+      `Cross-profile access denied: record "${id}" does not belong to profile "${expectedProfileId}".`,
+    );
   }
 
   await recordAuditEvent({
@@ -268,12 +307,9 @@ export async function deleteRecord(
     category: existing.category,
     status: 'success',
     details: {
-      deleted_record_snapshot: {
-        indicator: existing.indicator,
-        value: existing.value,
-        unit: existing.unit,
-        timestamp: existing.timestamp,
-      },
+      indicator: existing.indicator,
+      unit: existing.unit,
+      measurement_timestamp: existing.timestamp,
     },
   });
 

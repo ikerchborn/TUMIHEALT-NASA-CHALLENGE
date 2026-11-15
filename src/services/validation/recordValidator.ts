@@ -5,7 +5,7 @@ import type {
   ValidationIssue,
   ValidationResult,
 } from '@/types';
-import { getAllowedUnits } from './unitRegistry';
+import { getAllowedUnits, getAmbiguousUnitNote } from './unitRegistry';
 
 const VALID_DATA_ORIGINS: ReadonlySet<DataOrigin> = new Set([
   'SPACEFLIGHT',
@@ -109,7 +109,14 @@ export function validateHealthRecordInput(
     );
   } else if (isNonEmptyString(input.indicator)) {
     const allowedUnits = getAllowedUnits(input.category, input.indicator);
-    if (allowedUnits && !allowedUnits.includes(input.unit.trim())) {
+    const ambiguousNote = getAmbiguousUnitNote(
+      input.category,
+      input.indicator,
+      input.unit,
+    );
+    if (ambiguousNote) {
+      addIssue(errors, 'unit', 'AMBIGUOUS_SOURCE_UNIT', ambiguousNote);
+    } else if (allowedUnits && !allowedUnits.includes(input.unit.trim())) {
       addIssue(
         errors,
         'unit',

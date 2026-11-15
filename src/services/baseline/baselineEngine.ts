@@ -50,13 +50,30 @@ export function calculatePersonalBaselineFromRecords(
     ? Date.parse(options.referenceDate)
     : Date.now();
 
+  const fromMs = options.dateRange?.from
+    ? Date.parse(options.dateRange.from)
+    : undefined;
+  const toMs = options.dateRange?.to ? Date.parse(options.dateRange.to) : undefined;
+
   const scoped = records
-    .filter(
-      (r) =>
-        r.astronaut_id === options.astronaut_id &&
-        r.category === options.category &&
-        r.indicator === options.indicator,
-    )
+    .filter((r) => {
+      if (
+        r.astronaut_id !== options.astronaut_id ||
+        r.category !== options.category ||
+        r.indicator !== options.indicator
+      ) {
+        return false;
+      }
+      if (fromMs !== undefined && !Number.isNaN(fromMs)) {
+        const ts = Date.parse(r.timestamp);
+        if (Number.isNaN(ts) || ts < fromMs) return false;
+      }
+      if (toMs !== undefined && !Number.isNaN(toMs)) {
+        const ts = Date.parse(r.timestamp);
+        if (Number.isNaN(ts) || ts > toMs) return false;
+      }
+      return true;
+    })
     .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
 
   const excluded: ExcludedRecordReason[] = [];

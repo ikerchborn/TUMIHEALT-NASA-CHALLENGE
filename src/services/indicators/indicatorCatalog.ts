@@ -26,6 +26,7 @@ export const SCIENTIFIC_INDICATOR_CATALOG: readonly ScientificIndicatorMetadata[
     evidence_reference: ['https://osdr.nasa.gov/bio/repo/data/studies/OSD-569'],
     limitations: [
       'Intermittent sampling; OSD-569 provides relative timepoints (e.g., L-3, R+1) rather than absolute ISO timestamps.',
+      'OSD-569 (LSDS-7 CBC) source records label hemoglobin with unit "%" and quality_status "source_value_present; unit_label_requires_verification". "%" is not converted to "g/dL" and is rejected until verified.',
     ],
     availability_status: 'available_in_nasa_dataset',
   },

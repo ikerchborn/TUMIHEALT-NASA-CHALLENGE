@@ -45,3 +45,21 @@ export function getAllowedUnits(
   const normalized = indicator.trim().toLowerCase();
   return INDICATOR_UNIT_REGISTRY[category][normalized];
 }
+
+/**
+ * Known source-dataset unit discrepancies that require verification and must
+ * be rejected rather than silently converted or accepted as standard units.
+ */
+export const AMBIGUOUS_SOURCE_UNIT_NOTES: Record<string, string> = {
+  'blood:hemoglobin:%':
+    'OSD-569 (LSDS-7 CBC) labels hemoglobin with "%" (marked unit_label_requires_verification). "%" is rejected without converting to g/dL until the source unit is verified.',
+};
+
+export function getAmbiguousUnitNote(
+  category: HealthCategory,
+  indicator: string,
+  unit: string,
+): string | undefined {
+  const key = `${category}:${indicator.trim().toLowerCase()}:${unit.trim()}`;
+  return AMBIGUOUS_SOURCE_UNIT_NOTES[key];
+}
