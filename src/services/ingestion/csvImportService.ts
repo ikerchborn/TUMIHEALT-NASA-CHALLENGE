@@ -14,6 +14,7 @@ import { recordAuditEvent } from '@/services/audit';
 import { initializeDatabase } from '@/services/storage/db';
 import { insertRecord } from '@/services/storage/recordStorage';
 import { validateHealthRecordInput } from '@/services/validation';
+import { validateCsvUploadConstraints } from '@/services/security';
 import { parseCsv } from './csvParser';
 
 const MISSING_MARKERS = new Set(['', 'NA', 'N/A', 'NULL', 'NONE', 'NOT_AVAILABLE']);
@@ -100,6 +101,13 @@ export async function prepareCsvImportPreview(params: {
   mapping: CsvColumnMapping;
   actorId?: string;
 }): Promise<CsvImportPreview> {
+  const uploadCheck = validateCsvUploadConstraints(
+    params.fileName,
+    new TextEncoder().encode(params.csvText).byteLength,
+  );
+  if (!uploadCheck.valid) {
+    throw new Error(uploadCheck.error);
+  }
   const db = await initializeDatabase();
   const { headers, rows } = parseCsv(params.csvText);
   const batchId = generateBatchId();

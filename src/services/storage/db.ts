@@ -5,11 +5,12 @@ import type {
   CardiovascularRecord,
   ImportBatch,
   LocalAstronautProfile,
+  MissionContext,
   SleepRecord,
 } from '@/types';
 
 export const DATABASE_NAME = 'tumi_healt_local_db';
-export const DATABASE_VERSION = 2;
+export const DATABASE_VERSION = 3;
 
 /**
  * Local IndexedDB database powered by Dexie.js.
@@ -25,6 +26,7 @@ export class TumiHealthDatabase extends Dexie {
   cardiovascular_records!: EntityTable<CardiovascularRecord, 'id'>;
   import_batches!: EntityTable<ImportBatch, 'batch_id'>;
   audit_events!: EntityTable<AuditEvent, 'event_id'>;
+  mission_contexts!: EntityTable<MissionContext, 'context_id'>;
 
   constructor(dbName: string = DATABASE_NAME) {
     super(dbName);
@@ -41,7 +43,7 @@ export class TumiHealthDatabase extends Dexie {
     });
 
     // Version 2: Add CSV import batch tracking and local audit trail stores
-    this.version(DATABASE_VERSION)
+    this.version(2)
       .stores({
         profiles: 'astronaut_id, display_name, created_at',
         blood_records:
@@ -68,6 +70,23 @@ export class TumiHealthDatabase extends Dexie {
             });
         }
       });
+
+    // Version 3: Add mission_contexts store for operational & environmental context
+    this.version(DATABASE_VERSION).stores({
+      profiles: 'astronaut_id, display_name, created_at',
+      blood_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      sleep_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      cardiovascular_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      import_batches:
+        'batch_id, profile_id, category, status, created_at, [profile_id+created_at]',
+      audit_events:
+        'event_id, record_id, profile_id, action, timestamp, status, [profile_id+timestamp], [record_id+timestamp]',
+      mission_contexts:
+        'context_id, astronaut_id, mission_id, mission_phase, recorded_at, [astronaut_id+recorded_at]',
+    });
   }
 }
 
