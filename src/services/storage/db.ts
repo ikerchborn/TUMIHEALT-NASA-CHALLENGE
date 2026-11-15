@@ -6,11 +6,13 @@ import type {
   ImportBatch,
   LocalAstronautProfile,
   MissionContext,
+  ResearchAggregate,
+  ResearchDatasetRecord,
   SleepRecord,
 } from '@/types';
 
 export const DATABASE_NAME = 'tumi_healt_local_db';
-export const DATABASE_VERSION = 3;
+export const DATABASE_VERSION = 4;
 
 /**
  * Local IndexedDB database powered by Dexie.js.
@@ -27,6 +29,8 @@ export class TumiHealthDatabase extends Dexie {
   import_batches!: EntityTable<ImportBatch, 'batch_id'>;
   audit_events!: EntityTable<AuditEvent, 'event_id'>;
   mission_contexts!: EntityTable<MissionContext, 'context_id'>;
+  research_records!: EntityTable<ResearchDatasetRecord, 'record_id'>;
+  research_aggregates!: EntityTable<ResearchAggregate, 'aggregate_id'>;
 
   constructor(dbName: string = DATABASE_NAME) {
     super(dbName);
@@ -72,6 +76,23 @@ export class TumiHealthDatabase extends Dexie {
       });
 
     // Version 3: Add mission_contexts store for operational & environmental context
+    this.version(3).stores({
+      profiles: 'astronaut_id, display_name, created_at',
+      blood_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      sleep_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      cardiovascular_records:
+        'id, astronaut_id, timestamp, indicator, import_batch_id, [astronaut_id+timestamp], [astronaut_id+indicator]',
+      import_batches:
+        'batch_id, profile_id, category, status, created_at, [profile_id+created_at]',
+      audit_events:
+        'event_id, record_id, profile_id, action, timestamp, status, [profile_id+timestamp], [record_id+timestamp]',
+      mission_contexts:
+        'context_id, astronaut_id, mission_id, mission_phase, recorded_at, [astronaut_id+recorded_at]',
+    });
+
+    // Version 4: Add separate research_records and research_aggregates stores
     this.version(DATABASE_VERSION).stores({
       profiles: 'astronaut_id, display_name, created_at',
       blood_records:
@@ -86,6 +107,10 @@ export class TumiHealthDatabase extends Dexie {
         'event_id, record_id, profile_id, action, timestamp, status, [profile_id+timestamp], [record_id+timestamp]',
       mission_contexts:
         'context_id, astronaut_id, mission_id, mission_phase, recorded_at, [astronaut_id+recorded_at]',
+      research_records:
+        'record_id, category, source_dataset, source_subject_id, indicator, study_timepoint, [source_dataset+source_subject_id]',
+      research_aggregates:
+        'aggregate_id, category, source_dataset, indicator, group_label, [source_dataset+indicator]',
     });
   }
 }

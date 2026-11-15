@@ -213,3 +213,77 @@ export interface LocalBackupPayload {
   audit_events: unknown[];
   checksum_sha256: string;
 }
+
+export interface ResearchProvenance {
+  source_dataset: string;
+  source_file: string;
+  source_variable: string;
+  source_subject_id?: string;
+  original_value: number | string | null;
+  original_unit: string | null;
+  transformation_version: string;
+  data_origin: Exclude<DataOrigin, 'SYNTHETIC'>;
+}
+
+export interface ResearchDatasetRecord {
+  record_id: string;
+  category: HealthCategory;
+  source_dataset: string;
+  source_subject_id: string;
+  timestamp: string | null;
+  study_timepoint: string | null;
+  study_phase: string | null;
+  collection_context: string;
+  indicator: string;
+  value: number | null;
+  unit: string;
+  reference_range_min?: number | null;
+  reference_range_max?: number | null;
+  sample_id?: string;
+  specimen_type?: string;
+  assay?: string;
+  quality_status: string;
+  data_origin: Exclude<DataOrigin, 'SYNTHETIC'>;
+  provenance: ResearchProvenance;
+}
+
+export interface ResearchAggregate {
+  aggregate_id: string;
+  category: HealthCategory;
+  source_dataset: string;
+  source_sheet: string;
+  source_row: number;
+  indicator: string;
+  value: number | null;
+  unit: string;
+  group_label: string;
+  aggregation_level: string;
+  measurement_phase: string;
+  statistic_type: string;
+  protocol_condition: string;
+  sample_size: number | null;
+  sd_i: number | null;
+  sd_t: number | null;
+  p_value: string | null;
+  quality_status: 'aggregated_not_individual';
+  data_origin: Exclude<DataOrigin, 'SYNTHETIC'>;
+  provenance: ResearchProvenance;
+}
+
+export interface EtlQualityIssue {
+  row_index: number;
+  variable: string;
+  code: string;
+  message: string;
+}
+
+export interface EtlProcessingReport {
+  dataset: string;
+  transformation_version: string;
+  total_source_rows: number;
+  output_records: number;
+  missing_value_count: number;
+  flagged_count: number;
+  deduplicated_count: number;
+  issues: EtlQualityIssue[];
+}

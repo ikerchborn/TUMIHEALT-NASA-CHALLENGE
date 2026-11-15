@@ -285,9 +285,9 @@ describe('Backend Remediation Regression Suite (P1–P3)', () => {
     legacyDb.close();
     closeDatabase();
 
-    // Open v3 TumiHealthDatabase and verify migration preserved data
+    // Open current TumiHealthDatabase and verify migration preserved data
     const upgraded = await initializeDatabase();
-    expect(upgraded.verno).toBe(3);
+    expect(upgraded.verno).toBe(4);
 
     const migratedRecords = await getRecords({ astronaut_id: 'astro-v1' });
     expect(migratedRecords).toHaveLength(1);

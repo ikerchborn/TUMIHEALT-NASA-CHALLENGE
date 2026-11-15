@@ -11,6 +11,9 @@ Import all services and types from `@/services` and `@/types`.
 - **Insights, Hazards & Assessment:** `generateExplainableInsights(options)`, `listAllHazards()`, `getHazardsForIndicator(indicatorId)`, `runSelfAssessment(options)`, `listGuidanceCatalog(category?)`
 - **Indicators & Mission Context:** `getIndicatorMetadata(id)`, `listIndicatorsByCategory(category?)`, `saveMissionContext(input)`, `getMissionContexts(astronautId)`
 - **Audit & Security:** `getProfileAuditHistory(profileId)`, `getRecordAuditHistory(recordId)`, `exportLocalBackup(astronautId?)`, `restoreLocalBackup(payload, options)`, `exportRecordsToSafeCsv(records)`
+- **NASA Research & Aggregates (Separated from Personal Records):**
+  - ETLs: `processCmpDataset(csvText)`, `processCbcDataset(csvText)`, `processApolloDataset(csvText)`, `processActigraphyDataset(csvTexts)`
+  - Persistence & Queries: `saveResearchDatasetRecords(records)`, `queryResearchDatasetRecords(filter?)`, `saveResearchAggregates(aggregates)`, `queryResearchAggregates(filter?)`
 
 ## Example Synthetic Request & Response
 ```ts
