@@ -179,6 +179,7 @@ export interface MissionContext {
   mission_phase: MissionPhase;
   environment_type: string;
   gravity_environment: GravityEnvironment;
+  mission_start_date?: string;
   activity_context?: string;
   sleep_context?: string;
   measurement_context?: string;
@@ -192,6 +193,7 @@ export interface MissionContextInput {
   mission_phase: MissionPhase;
   environment_type: string;
   gravity_environment: GravityEnvironment;
+  mission_start_date?: string;
   activity_context?: string;
   sleep_context?: string;
   measurement_context?: string;

@@ -16,6 +16,8 @@ Thumbs.db
 # Logs and temporary files
 *.log
 *.tmp
+test-results/
+playwright-report/
 
 # Data files (large research datasets) – add specific patterns if needed
 # data/raw/**

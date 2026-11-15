@@ -189,7 +189,7 @@ describe('Backend Remediation Regression Suite (P1–P3)', () => {
         sourceDataset: 'dup_test',
         mapping: { timestamp: 'ts', indicator: 'ind', value: 'val', unit: 'unit' },
       }),
-    ).rejects.toThrow(/Duplicate CSV import blocked/i);
+    ).rejects.toThrow(/Duplicate import blocked.*entire file.*1 measurement row/i);
 
     // Explicit override with allowDuplicate: true succeeds and links batch ID
     const previewOverride = await prepareCsvImportPreview({
@@ -247,7 +247,7 @@ describe('Backend Remediation Regression Suite (P1–P3)', () => {
     expect(baseline.max).toBe(64);
   });
 
-  it('P3: migrates existing Dexie v1 records safely through v2 to v3', async () => {
+  it('P3: migrates existing Dexie v1 records safely through version 6', async () => {
     await deleteLocalDatabase();
 
     // Seed a legacy v1 database directly
@@ -287,14 +287,16 @@ describe('Backend Remediation Regression Suite (P1–P3)', () => {
 
     // Open current TumiHealthDatabase and verify migration preserved data
     const upgraded = await initializeDatabase();
-    expect(upgraded.verno).toBe(4);
+    expect(upgraded.verno).toBe(6);
+    expect(await upgraded.daily_checkins.count()).toBe(0);
+    expect(await upgraded.medical_review_requests.count()).toBe(0);
 
     const migratedRecords = await getRecords({ astronaut_id: 'astro-v1' });
     expect(migratedRecords).toHaveLength(1);
     expect(migratedRecords[0].ingestion_method).toBe('MANUAL');
     expect(migratedRecords[0].value).toBe(4.4);
 
-    // Verify v3 mission_contexts store works after migration
+    // Verify the additive mission-context store remains available after migration.
     const ctx = await saveMissionContext({
       astronaut_id: 'astro-v1',
       mission_id: 'MIGRATION-CHECK',

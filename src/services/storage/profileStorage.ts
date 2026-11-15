@@ -94,7 +94,7 @@ export async function updateProfile(
 
 /**
  * Deletes a local astronaut profile and all health records associated with it
- * across blood, sleep, and cardiovascular tables in a single transaction.
+ * across health and daily check-in tables in a single transaction.
  */
 export async function deleteProfile(astronautId: string): Promise<{
   deletedProfile: boolean;
@@ -110,6 +110,8 @@ export async function deleteProfile(astronautId: string): Promise<{
       db.sleep_records,
       db.cardiovascular_records,
       db.mission_contexts,
+      db.daily_checkins,
+      db.medical_review_requests,
     ],
     async () => {
       const existing = await db.profiles.get(astronautId);
@@ -125,6 +127,14 @@ export async function deleteProfile(astronautId: string): Promise<{
         .where('astronaut_id')
         .equals(astronautId)
         .delete();
+      const checkInCount = await db.daily_checkins
+        .where('profile_id')
+        .equals(astronautId)
+        .delete();
+      const reviewRequestCount = await db.medical_review_requests
+        .where('profile_id')
+        .equals(astronautId)
+        .delete();
       await db.mission_contexts.where('astronaut_id').equals(astronautId).delete();
 
       if (existing) {
@@ -133,7 +143,8 @@ export async function deleteProfile(astronautId: string): Promise<{
 
       return {
         deletedProfile: Boolean(existing),
-        deletedRecordsCount: bloodCount + sleepCount + cardioCount,
+        deletedRecordsCount:
+          bloodCount + sleepCount + cardioCount + checkInCount + reviewRequestCount,
       };
     },
   );

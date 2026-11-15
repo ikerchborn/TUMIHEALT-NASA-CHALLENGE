@@ -1,7 +1,7 @@
 # Astronaut Health Monitoring System — TUMI-HEALT
 
 ## Project Overview
-The TUMI-HEALT platform enables astronauts to record, review, and visualise their personal health data across three core categories: blood biomarkers, sleep monitoring, and cardiovascular monitoring. The system is a web‑based frontend that stores each astronaut’s records locally in the browser using IndexedDB.
+TUMI-HEALT lets astronauts import and review personal health records across blood biomarkers, sleep, and cardiovascular health. Personal records are stored locally in the browser using IndexedDB. Health measurements enter through file import; the application UI does not provide manual measurement entry.
 
 ## NASA Space Apps Challenge 2026
 TUMI-HEALT is developed as part of the **2026 NASA Space Apps Challenge**, responding to the official challenge **“Create Health Monitoring Software for Astronauts on Space Missions.”** (see https://www.spaceappschallenge.org/2026/challenges/health-monitoring-software/).
@@ -32,7 +32,7 @@ The platform supports astronaut self‑assessment through three monitoring categ
 - Include cardiac output when suitable measurements are available.
 - Consider activity context and sleep state when interpreting cardiovascular data.
 
-By transforming raw health measurements into clear visualisations, TUMI-HEALT enables astronauts to evaluate their health status and identify changes that may warrant attention.
+By transforming imported health measurements into clear visualisations, TUMI-HEALT helps astronauts review their own data and identify changes that may warrant attention. It does not provide a clinical diagnosis.
 
 ## Project Objectives
 - Monitor blood biomarkers.
@@ -42,10 +42,20 @@ By transforming raw health measurements into clear visualisations, TUMI-HEALT en
 - Provide health‑data interpretation tools **without** claiming clinical diagnosis.
 
 ## Key Features
-- **Planned**: Data entry UI for blood, sleep, and cardiovascular metrics.
-- **Planned**: Interactive dashboards with trend charts.
-- **Implemented**: Local persistence using IndexedDB via Dexie.js (foundation present).
-- **Planned**: Validation services, analytics, and export functionality.
+- **Implemented**: First-use welcome, local profiles, and an isolated synthetic demo profile.
+- **Implemented**: CSV, XML, and Excel (.xlsx; legacy .xls is also accepted) personal imports, generated templates, row-level validation, duplicate detection, downloadable rejection reports, and explicit confirmation before partial imports.
+- **Implemented**: Blood, sleep, and cardiovascular history views with charts, personal baselines, and indicator education.
+- **Implemented**: My Measurements Import/History tabs and a personal Trends workspace with 7D/14D/30D/90D/MAX ranges, four charts, symptom check-in markers, and a mission timeline.
+- **Implemented**: Daily Check-in for self-reported mood, energy, symptoms, and notes. Entries are stored separately from measurements, are editable once per profile and date, and are labeled as self-reported or synthetic demo data.
+- **Implemented**: Mission Home shows the active profile, mission day when a start date is configured, today’s check-in, four health summaries, recent activity, and engine-derived observations.
+- **Implemented**: Body Explorer provides an interactive, keyboard-accessible 2D SVG with head/sleep, chest/cardiovascular, torso/blood, and educational bones/muscles regions. No licensed `.glb` asset is present, so the app does not load a 3D model.
+- **Implemented**: Health Assistant answers four questions with deterministic local rules, dates for supporting records, missing-data prompts, personal-baseline comparisons, and explicit non-diagnostic language. It makes no LLM or network calls.
+- **Implemented**: Medical review drawer selects local measurements and check-ins, stores Draft/Pending (local)/Exported requests on-device, and downloads a JSON summary. It never simulates sending or receiving a response; exports are disabled in demo mode.
+- **Implemented**: Health Guides explains indicators simply before advanced details; the Space Health Risks tab presents the five RIDGE hazards.
+- **Implemented**: NASA research ETL and storage stay separate from personal records and are labeled as scientific research, not personal health records.
+- **Implemented**: Mission & Privacy explains local storage and profile selection accurately; import, backup, restore, and export actions are disabled in demo mode.
+- **Implemented**: Local persistence with IndexedDB via Dexie.js, audit history, and backup/restore.
+- **Not supported yet**: Measurement entry from devices, a licensed 3D anatomical model, or any connection to a medical team.
 
 ## System Architecture
 - **Frontend**: React + TypeScript + Vite.
@@ -59,7 +69,7 @@ By transforming raw health measurements into clear visualisations, TUMI-HEALT en
 - TypeScript
 - Vite
 - IndexedDB (Dexie.js)
-- Recharts (planned for visualisation)
+- Recharts (health trend visualisation)
 - Git & GitHub
 
 *All technologies are proposed; concrete implementation may evolve.*
@@ -76,7 +86,7 @@ NASA and other research datasets are used to understand how spaceflight and grou
 **Data Origin Classification**
 - `SPACEFLIGHT`: Data collected during actual spaceflight missions.
 - `GROUND_ANALOG`: Data from ground‑based simulations or bed‑rest studies (e.g., UTMB Campaign 1).
-- `SYNTHETIC`: Artificially generated data for testing (none currently used).
+- `SYNTHETIC`: Artificially generated data for testing and the clearly labeled demo profile.
 
 Ground‑based analog data are never presented as actual spaceflight measurements.
 
@@ -135,6 +145,7 @@ Personal astronaut health records are stored **only** in the browser’s Indexed
 - Unit tests under `tests/unit/`.
 - Integration tests under `tests/integration/`.
 - Data‑validation tests under `tests/data-validation/`.
+- Browser QA: `npm run test:e2e`, `npm run qa:a11y`, `npm run qa:screenshots`, and `npm run qa:lighthouse`.
 
 ## Scientific Considerations and Limitations
 - Research datasets originate from varied subjects and collection periods; ground‑analog data is **not** equivalent to spaceflight data.
@@ -143,7 +154,7 @@ Personal astronaut health records are stored **only** in the browser’s Indexed
 - The platform is **not** a replacement for professional medical advice.
 
 ## Project Status
-**INITIAL STRUCTURE / DEVELOPMENT IN PROGRESS**
+**Frontend and local data services are implemented; check the compliance matrix for current capabilities and known gaps.**
 
 ## License and Acknowledgments
 License: GPL-3.0 license

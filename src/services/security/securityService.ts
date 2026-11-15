@@ -13,6 +13,30 @@ import { initializeDatabase } from '@/services/storage/db';
 import { validateHealthRecordInput } from '@/services/validation';
 
 export const MAX_CSV_FILE_BYTES = 5 * 1024 * 1024; // 5 MiB safety limit
+export const MAX_MEASUREMENT_FILE_BYTES = MAX_CSV_FILE_BYTES;
+
+export function validateMeasurementFileConstraints(
+  fileName: string,
+  byteLength: number,
+): { valid: boolean; format?: 'csv' | 'xml' | 'xlsx' | 'xls'; error?: string } {
+  const extension = fileName.toLowerCase().split('.').pop();
+  if (extension !== 'csv' && extension !== 'xml' && extension !== 'xlsx' && extension !== 'xls') {
+    return {
+      valid: false,
+      error: 'This file type is not supported. Upload a CSV (.csv), XML (.xml), or Excel workbook (.xlsx).',
+    };
+  }
+  if (byteLength <= 0) {
+    return { valid: false, error: 'The selected file is empty. Choose a non-empty CSV, XML, or XLSX file.' };
+  }
+  if (byteLength > MAX_MEASUREMENT_FILE_BYTES) {
+    return {
+      valid: false,
+      error: `The file exceeds the 5 MiB limit (${MAX_MEASUREMENT_FILE_BYTES} bytes). Upload a smaller CSV, XML, or XLSX file.`,
+    };
+  }
+  return { valid: true, format: extension };
+}
 
 /**
  * Validates CSV file size and extension before parsing.
