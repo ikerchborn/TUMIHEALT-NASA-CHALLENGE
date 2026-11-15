@@ -327,3 +327,33 @@ test('final UX improvements: welcome title & 6 team cards, one-click 90d demo, e
     animations: 'disabled',
   });
 });
+
+test('Personal Profile provides purple 90-day synthetic .xlsx scenario download without modifying profile data', async ({ page }) => {
+  await createPersonalProfile(page);
+  await page.goto('/profiles');
+
+  const section = page.locator('section', { hasText: 'Download 90-Day Health Scenario' });
+  await expect(section).toBeVisible();
+  await expect(
+    section.getByText(
+      'Explore a realistic synthetic astronaut health history, including changes in sleep, nutrition, physiological indicators and laboratory results.',
+    ),
+  ).toBeVisible();
+
+  const downloadBtn = section.getByRole('button', { name: 'Download Excel Dataset (.xlsx)' });
+  await expect(downloadBtn).toBeVisible();
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    downloadBtn.click(),
+  ]);
+  expect(download.suggestedFilename()).toBe('tumi-healt-90d-synthetic-astronaut-scenario.xlsx');
+
+  await expect(
+    page.getByText(/Your personal profile data was not modified/i),
+  ).toBeVisible();
+
+  // Verify personal profile remains empty on Dashboard
+  await page.goto('/');
+  await expect(page.getByText('All Indicators (0)')).toBeVisible();
+});

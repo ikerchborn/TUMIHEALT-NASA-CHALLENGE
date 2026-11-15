@@ -190,6 +190,15 @@ function rejectedRowsCsv(preview: CsvImportPreview): string {
 
 function isLikelyNasaResearchSheet(headers: string[], sheetCount: number): boolean {
   const set = new Set(headers.map((h) => h.trim()));
+  if (
+    set.has('timestamp') &&
+    set.has('indicator') &&
+    set.has('value') &&
+    set.has('unit') &&
+    set.has('data_origin')
+  ) {
+    return false;
+  }
   if (set.has('Archivo original') && set.has('Hoja en este Excel')) return true;
   if (set.has('Sample Name') && (set.has('albumin_value_gram_per_deciliter') || set.has('absolute_basophils_value_cells_per_microliter'))) return true;
   if (set.has('aggregation_level') && set.has('group_label')) return true;
