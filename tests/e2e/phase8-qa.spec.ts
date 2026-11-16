@@ -319,7 +319,7 @@ test('final UX improvements: welcome title & 6 team cards, one-click 90d demo, e
   );
   await expect(page.getByRole('heading', { name: /2 · Column Mapping/ })).toBeVisible();
   await page.getByRole('button', { name: 'Validate & Preview' }).click();
-  await expect(page.getByText('Valid: 135')).toBeVisible();
+  await expect(page.getByText('Valid: 270')).toBeVisible();
 
   await page.screenshot({
     path: resolve(screenshotsDir, '05-import-process.png'),
@@ -374,17 +374,15 @@ test('Personal astronaut account can download 90-day .xlsx example and import al
   // Personal profile still has 0 indicators until user uploads it
   await expect(page.getByText('All Indicators (0)')).toBeVisible();
 
-  // Upload the .xlsx on /import: auto-selects first measurement sheet (not README) and validates cleanly
+  // Upload the .xlsx on /import: Validate & Preview automatically prepares all 3 measurement sheets
   await page.goto('/import');
   await page.locator('input[type="file"]').setInputFiles(xlsxPath);
   await page.getByRole('button', { name: 'Validate & Preview' }).click();
   await expect(page.getByText(/Invalid:\s*0/)).toBeVisible();
+  await expect(page.getByText(/Multi-sheet workbook ready:/)).toBeVisible();
+  await page.getByRole('button', { name: /Confirm import of 1360 rows \(3 sheets\)/i }).click();
 
-  const importAllBtn = page.getByRole('button', { name: /Import All Measurement Sheets \(3 sheets\)/i });
-  await expect(importAllBtn).toBeVisible();
-  await importAllBtn.click();
-
-  await expect(page.getByText(/Imported \d+ records across 3 sheets \(Cardiovascular, Sleep, Blood_Labs\)\./)).toBeVisible();
+  await expect(page.getByText(/Imported 1360 records across 3 sheets \(Cardiovascular, Sleep, Blood_Labs\)\./)).toBeVisible();
 
   // Verify personal dashboard now displays the imported indicators & observations
   await page.goto('/');

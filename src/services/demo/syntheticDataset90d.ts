@@ -4,6 +4,7 @@ import type {
   HealthRecord,
   SleepRecord,
 } from '@/types';
+import { buildSyntheticScenarioDataset } from './syntheticScenarioXlsx';
 
 export const SYNTHETIC_DATASET_SOURCE =
   'TUMI-HEALT 90-Day Synthetic Astronaut Dataset (SYNTHETIC)';
@@ -666,17 +667,9 @@ export function buildSynthetic90DayRecords(
   return records;
 }
 
-function csvCell(val: string | number | null | undefined): string {
-  if (val === null || val === undefined) return 'NA';
-  const str = String(val);
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
-}
-
 /**
- * Generates import-ready CSV files for each health category from the 90-day synthetic dataset.
+ * Generates import-ready CSV files for each health category covering all 52 supported
+ * TUMI-HEALT indicators (39 blood, 3 sleep, 10 cardiovascular) across 90 days.
  */
 export function buildSynthetic90DayCsvFiles(
   astronautId = 'astro-01',
@@ -686,83 +679,10 @@ export function buildSynthetic90DayCsvFiles(
   sleepCsv: string;
   bloodCsv: string;
 } {
-  const all = buildSynthetic90DayRecords(astronautId, referenceDate);
-
-  const bloodHeader =
-    'astronaut_id,timestamp,indicator,value,unit,data_origin,source_dataset,quality_status,sample_id,specimen_type,assay';
-  const bloodRows = all
-    .filter((r): r is BloodRecord => r.category === 'blood')
-    .map((r) =>
-      [
-        r.astronaut_id,
-        r.timestamp,
-        r.indicator,
-        r.value === null ? 'NA' : r.value,
-        r.unit,
-        r.data_origin,
-        r.source_dataset,
-        r.quality_status,
-        r.sample_id ?? '',
-        r.specimen_type ?? '',
-        r.assay ?? '',
-      ]
-        .map(csvCell)
-        .join(','),
-    );
-
-  const sleepHeader =
-    'astronaut_id,timestamp,indicator,value,unit,data_origin,source_dataset,quality_status,sleep_start,sleep_end,sleep_duration,sleep_efficiency,sleep_latency';
-  const sleepRows = all
-    .filter((r): r is SleepRecord => r.category === 'sleep')
-    .map((r) =>
-      [
-        r.astronaut_id,
-        r.timestamp,
-        r.indicator,
-        r.value === null ? 'NA' : r.value,
-        r.unit,
-        r.data_origin,
-        r.source_dataset,
-        r.quality_status,
-        r.sleep_start ?? 'NA',
-        r.sleep_end ?? 'NA',
-        r.sleep_duration ?? 'NA',
-        r.sleep_efficiency ?? 'NA',
-        r.sleep_latency ?? 'NA',
-      ]
-        .map(csvCell)
-        .join(','),
-    );
-
-  const cvHeader =
-    'astronaut_id,timestamp,indicator,value,unit,data_origin,source_dataset,quality_status,heart_rate,systolic_blood_pressure,diastolic_blood_pressure,cardiac_output,activity_context,sleep_state,device_id';
-  const cvRows = all
-    .filter((r): r is CardiovascularRecord => r.category === 'cardiovascular')
-    .map((r) =>
-      [
-        r.astronaut_id,
-        r.timestamp,
-        r.indicator,
-        r.value === null ? 'NA' : r.value,
-        r.unit,
-        r.data_origin,
-        r.source_dataset,
-        r.quality_status,
-        r.heart_rate ?? '',
-        r.blood_pressure?.systolic ?? '',
-        r.blood_pressure?.diastolic ?? '',
-        r.cardiac_output ?? '',
-        r.activity_context ?? '',
-        r.sleep_state ?? '',
-        r.device_id ?? '',
-      ]
-        .map(csvCell)
-        .join(','),
-    );
-
+  const dataset = buildSyntheticScenarioDataset(astronautId, referenceDate);
   return {
-    bloodCsv: [bloodHeader, ...bloodRows].join('\n') + '\n',
-    sleepCsv: [sleepHeader, ...sleepRows].join('\n') + '\n',
-    cardiovascularCsv: [cvHeader, ...cvRows].join('\n') + '\n',
+    bloodCsv: `${dataset.bloodCsv}\n`,
+    sleepCsv: `${dataset.sleepCsv}\n`,
+    cardiovascularCsv: `${dataset.cardiovascularCsv}\n`,
   };
 }

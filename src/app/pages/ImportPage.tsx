@@ -231,6 +231,10 @@ export function ImportPage() {
   const [importedRecords, setImportedRecords] = useState<HealthRecord[]>([]);
   const [historyRecords, setHistoryRecords] = useState<HealthRecord[]>([]);
   const [bulkImporting, setBulkImporting] = useState(false);
+  const [importedSheetIndices, setImportedSheetIndices] = useState<number[]>([]);
+  const [extraPreviews, setExtraPreviews] = useState<
+    Array<{ sheetName: string; preview: CsvImportPreview }>
+  >([]);
 
   useEffect(() => {
     setBatches([]);
@@ -433,6 +437,8 @@ export function ImportPage() {
     setXmlRecordLocations({});
     setInspection(null);
     setSheets([]);
+    setImportedSheetIndices([]);
+    setExtraPreviews([]);
     setCsvText('');
     const constraints = validateMeasurementFileConstraints(file.name, file.size);
     if (!constraints.valid || !constraints.format) {
@@ -501,19 +507,64 @@ export function ImportPage() {
       return;
     }
     try {
-      setPreview(
-        await prepareCsvImportPreview({
-          csvText,
-          fileName: inspection.file_name,
-          profileId: active.astronaut_id,
-          category,
-          dataOrigin: origin,
-          sourceDataset: sourceDataset || inspection.file_name,
-          sourceFileName: originalFileName,
-          fileFormat,
-          mapping: mapping as CsvColumnMapping,
-        }),
-      );
+      const primaryPreview = await prepareCsvImportPreview({
+        csvText,
+        fileName: inspection.file_name,
+        profileId: active.astronaut_id,
+        category,
+        dataOrigin: origin,
+        sourceDataset: sourceDataset || inspection.file_name,
+        sourceFileName: originalFileName,
+        fileFormat,
+        mapping: mapping as CsvColumnMapping,
+      });
+
+      const extras: Array<{ sheetName: string; preview: CsvImportPreview }> = [];
+      const importableNames = new Set(getImportableSheets().map((s) => s.sheetName));
+      for (let idx = 0; idx < sheets.length; idx += 1) {
+        if (idx === selectedSheetIdx || importedSheetIndices.includes(idx)) continue;
+        const s = sheets[idx];
+        if (!importableNames.has(s.sheetName)) continue;
+        try {
+          const sheetFileName = `${s.sheetName}.csv`;
+          const info = inspectCsvFile(s.csvText, sheetFileName);
+          const guessed = guessMapping(info.headers);
+          const detectedCat = detectCategoryFromRows(info.sample_rows, guessed.indicator) ?? category;
+          const sampleOrigin = info.sample_rows[0]?.data_origin?.trim().toUpperCase();
+          const resolvedOrigin: DataOrigin =
+            sampleOrigin === 'SYNTHETIC' || sampleOrigin === 'SPACEFLIGHT' || sampleOrigin === 'GROUND_ANALOG'
+              ? sampleOrigin
+              : origin;
+
+          const sheetPrev = await prepareCsvImportPreview({
+            profileId: active.astronaut_id,
+            actorId: active.astronaut_id,
+            category: detectedCat,
+            fileName: sheetFileName,
+            sourceFileName: `${originalFileName}#${s.sheetName}`,
+            fileFormat,
+            csvText: s.csvText,
+            dataOrigin: resolvedOrigin,
+            sourceDataset:
+              info.sample_rows[0]?.source_dataset?.trim() ||
+              sourceDataset.trim() ||
+              originalFileName.replace(/\.(csv|xml|xlsx|xls)$/i, ''),
+            mapping: {
+              timestamp: guessed.timestamp ?? 'timestamp',
+              indicator: guessed.indicator ?? 'indicator',
+              value: guessed.value ?? 'value',
+              unit: guessed.unit ?? 'unit',
+              ...guessed,
+            },
+          });
+          extras.push({ sheetName: s.sheetName, preview: sheetPrev });
+        } catch {
+          // Skip sheets already imported or non-matching
+        }
+      }
+
+      setPreview(primaryPreview);
+      setExtraPreviews(extras);
     } catch (err) {
       setError(formatFileImportError(originalFileName, err));
     }
@@ -527,16 +578,56 @@ export function ImportPage() {
     if (!preview) return;
     try {
       const res = await confirmCsvImport(preview);
-      setResult(`Imported ${res.imported_count} records. Skipped invalid rows: ${res.skipped_invalid_count}.`);
-      setImportedBatch(res.batch);
-      const importedIds = new Set(res.imported_record_ids);
-      const records = await getRecords({ astronaut_id: res.batch.profile_id });
-      setImportedRecords(
-        records.filter((record) => importedIds.has(record.id) && record.import_batch_id === res.batch.batch_id),
-      );
+      let totalImported = res.imported_count;
+      let totalSkipped = res.skipped_invalid_count;
+      let lastBatch = res.batch;
+      const allImportedIds = new Set(res.imported_record_ids);
+      const sheetNamesImported = [sheets[selectedSheetIdx]?.sheetName].filter(Boolean) as string[];
+
+      for (const extra of extraPreviews) {
+        const extraRes = await confirmCsvImport(extra.preview);
+        totalImported += extraRes.imported_count;
+        totalSkipped += extraRes.skipped_invalid_count;
+        lastBatch = extraRes.batch;
+        extraRes.imported_record_ids.forEach((rid) => allImportedIds.add(rid));
+        sheetNamesImported.push(extra.sheetName);
+      }
+
+      setImportedBatch(lastBatch);
+      const records = await getRecords({ astronaut_id: lastBatch.profile_id });
+      setImportedRecords(records.filter((record) => allImportedIds.has(record.id)));
       setPreview(null);
-      setInspection(null);
-      setSheets([]);
+      setExtraPreviews([]);
+
+      if (extraPreviews.length > 0) {
+        setResult(
+          `Imported ${totalImported} records across ${sheetNamesImported.length} sheets (${sheetNamesImported.join(', ')}). Skipped invalid rows: ${totalSkipped}.`,
+        );
+        setInspection(null);
+        setSheets([]);
+      } else {
+        const nextImported = Array.from(new Set([...importedSheetIndices, selectedSheetIdx]));
+        setImportedSheetIndices(nextImported);
+
+        const importableNames = new Set(getImportableSheets().map((s) => s.sheetName));
+        const nextIdx = sheets.findIndex(
+          (s, idx) => importableNames.has(s.sheetName) && !nextImported.includes(idx),
+        );
+
+        if (nextIdx >= 0) {
+          const completedName = sheets[selectedSheetIdx]?.sheetName ?? 'sheet';
+          const nextName = sheets[nextIdx].sheetName;
+          setResult(
+            `Imported ${res.imported_count} records from "${completedName}". Next measurement sheet ready: "${nextName}".`,
+          );
+          setSelectedSheetIdx(nextIdx);
+          loadSheet(originalFileName, sheets[nextIdx]);
+        } else {
+          setResult(`Imported ${res.imported_count} records. Skipped invalid rows: ${res.skipped_invalid_count}.`);
+          setInspection(null);
+          setSheets([]);
+        }
+      }
     } catch (err) {
       setError(formatFileImportError(originalFileName, err));
     }
@@ -646,6 +737,70 @@ export function ImportPage() {
           </Alert>
         )}
 
+        <Card title="1 · File & Context">
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field label="CSV, XML, or Excel File (.csv, .xml, .xlsx; .xls — max 5 MiB)">
+              <input
+                type="file"
+                accept=".csv,.xml,.xlsx,.xls"
+                onChange={(e) => void onFile(e)}
+                className={`${inputClass} cursor-pointer border-mission-accent/60 bg-cyan-950/30 py-1.5 pl-1.5 file:mr-3 file:cursor-pointer file:rounded-control file:border-0 file:bg-mission-accent-strong file:px-3.5 file:py-1.5 file:text-xs file:font-semibold file:text-white file:transition hover:file:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-60`}
+                disabled={isDemoMode}
+              />
+            </Field>
+            <Field label="Category">
+              <select className={inputClass} value={category} onChange={(e) => setCategory(e.target.value as HealthCategory)}>
+                <option value="blood">Blood</option>
+                <option value="sleep">Sleep</option>
+                <option value="cardiovascular">Cardiovascular</option>
+              </select>
+            </Field>
+            <Field label="Data Origin">
+              <select className={inputClass} value={origin} onChange={(e) => setOrigin(e.target.value as DataOrigin)}>
+                <option value="GROUND_ANALOG">Ground Analog</option>
+                <option value="SPACEFLIGHT">Spaceflight</option>
+                <option value="SYNTHETIC">Synthetic</option>
+              </select>
+            </Field>
+          </div>
+          {autoDetectedNote && (
+            <div className="mt-3">
+              <Alert kind="info">{autoDetectedNote}</Alert>
+            </div>
+          )}
+          {sheets.length > 1 && (
+            <div className="mt-4 flex flex-wrap items-end gap-4">
+              <div className="min-w-[240px]">
+                <Field label="Excel Sheet">
+                  <select
+                    className={inputClass}
+                    value={selectedSheetIdx}
+                    onChange={(e) => onSheetChange(Number(e.target.value))}
+                  >
+                    {sheets.map((s, idx) => (
+                      <option key={s.sheetName} value={idx}>
+                        {s.sheetName}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              {getImportableSheets().length > 1 && (
+                <Button
+                  type="button"
+                  disabled={bulkImporting || isDemoMode}
+                  onClick={() => void onImportAllSheets()}
+                  className="border border-purple-400/50 bg-purple-700 text-white hover:bg-purple-600"
+                >
+                  {bulkImporting
+                    ? 'Importing all sheets…'
+                    : `Import All Measurement Sheets (${getImportableSheets().length} sheets)`}
+                </Button>
+              )}
+            </div>
+          )}
+        </Card>
+
         <Card title="What can I upload?">
           <p className="mb-3 text-sm text-slate-300">
             Upload one personal time-series in CSV, XML, or XLSX (maximum 5 MiB). Each measurement needs a timestamp, indicator, numeric value, and unit. XML files use a <code>TUMIMeasurements</code> root with one <code>Measurement</code> element per record. DTDs and entity declarations are not accepted.
@@ -704,82 +859,18 @@ export function ImportPage() {
                     Download Complete 90-Day Scenario (.xlsx)
                   </Button>
                   <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('blood')}>
-                    Download 90d Blood CSV (140 rows · 24 CBC/CMP biomarkers)
+                    Download 90d Blood CSV (273 rows · all 39 CBC/CMP biomarkers)
                   </Button>
                   <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('sleep')}>
-                    Download 90d Sleep CSV (135 rows · 3 sleep indicators)
+                    Download 90d Sleep CSV (270 rows · all 3 sleep indicators)
                   </Button>
                   <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('cardiovascular')}>
-                    Download 90d Cardiovascular &amp; Vitals CSV (320 rows · 8 indicators)
+                    Download 90d Cardiovascular &amp; Vitals CSV (817 rows · all 10 indicators)
                   </Button>
                 </div>
               </div>
             </div>
           </details>
-        </Card>
-
-        <Card title="1 · File & Context">
-          <div className="grid gap-4 md:grid-cols-3">
-            <Field label="CSV, XML, or Excel File (.csv, .xml, .xlsx; .xls — max 5 MiB)">
-              <input
-                type="file"
-                accept=".csv,.xml,.xlsx,.xls"
-                onChange={(e) => void onFile(e)}
-                className={inputClass}
-                disabled={isDemoMode}
-              />
-            </Field>
-            <Field label="Category">
-              <select className={inputClass} value={category} onChange={(e) => setCategory(e.target.value as HealthCategory)}>
-                <option value="blood">Blood</option>
-                <option value="sleep">Sleep</option>
-                <option value="cardiovascular">Cardiovascular</option>
-              </select>
-            </Field>
-            <Field label="Data Origin">
-              <select className={inputClass} value={origin} onChange={(e) => setOrigin(e.target.value as DataOrigin)}>
-                <option value="GROUND_ANALOG">Ground Analog</option>
-                <option value="SPACEFLIGHT">Spaceflight</option>
-                <option value="SYNTHETIC">Synthetic</option>
-              </select>
-            </Field>
-          </div>
-          {autoDetectedNote && (
-            <div className="mt-3">
-              <Alert kind="info">{autoDetectedNote}</Alert>
-            </div>
-          )}
-          {sheets.length > 1 && (
-            <div className="mt-4 flex flex-wrap items-end gap-4">
-              <div className="min-w-[240px]">
-                <Field label="Excel Sheet">
-                  <select
-                    className={inputClass}
-                    value={selectedSheetIdx}
-                    onChange={(e) => onSheetChange(Number(e.target.value))}
-                  >
-                    {sheets.map((s, idx) => (
-                      <option key={s.sheetName} value={idx}>
-                        {s.sheetName}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              </div>
-              {getImportableSheets().length > 1 && (
-                <Button
-                  type="button"
-                  disabled={bulkImporting || isDemoMode}
-                  onClick={() => void onImportAllSheets()}
-                  className="border border-purple-400/50 bg-purple-700 text-white hover:bg-purple-600"
-                >
-                  {bulkImporting
-                    ? 'Importing all sheets…'
-                    : `Import All Measurement Sheets (${getImportableSheets().length} sheets)`}
-                </Button>
-              )}
-            </div>
-          )}
         </Card>
 
         {inspection && isLikelyNasaResearchSheet(inspection.headers, sheets.length) && (
@@ -931,11 +1022,21 @@ export function ImportPage() {
                 </Button>
               </>
             )}
+            {extraPreviews.length > 0 && (
+              <div className="mb-4">
+                <Alert kind="info">
+                  Multi-sheet workbook ready: {[sheets[selectedSheetIdx]?.sheetName, ...extraPreviews.map((e) => e.sheetName)].filter(Boolean).join(', ')} —{' '}
+                  {preview.valid_records.length + extraPreviews.reduce((acc, e) => acc + e.preview.valid_records.length, 0)} valid rows total across {1 + extraPreviews.length} sheets.
+                </Alert>
+              </div>
+            )}
             <div className="flex gap-3">
               <Button onClick={() => void onConfirm()} disabled={preview.valid_records.length === 0}>
-                {preview.invalid_rows.length > 0
-                  ? `Import ${preview.valid_records.length} valid rows and skip ${preview.invalid_rows.length} invalid`
-                  : `Confirm import of ${preview.valid_records.length} rows`}
+                {extraPreviews.length > 0
+                  ? `Confirm import of ${preview.valid_records.length + extraPreviews.reduce((acc, e) => acc + e.preview.valid_records.length, 0)} rows (${1 + extraPreviews.length} sheets)`
+                  : preview.invalid_rows.length > 0
+                    ? `Import ${preview.valid_records.length} valid rows and skip ${preview.invalid_rows.length} invalid`
+                    : `Confirm import of ${preview.valid_records.length} rows`}
               </Button>
               <Button variant="ghost" onClick={() => void onCancel()}>Cancel</Button>
             </div>

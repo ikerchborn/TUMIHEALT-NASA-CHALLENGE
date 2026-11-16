@@ -172,10 +172,6 @@ export function WelcomePage() {
       <main className="mx-auto flex min-h-screen max-w-7xl flex-col justify-between px-5 py-8 sm:px-8 lg:px-10">
         {/* Top Centered System Title Banner (Section 8.1) */}
         <header className="mb-8 border-b border-slate-800/80 pb-6 text-center">
-          <div className="mb-2.5 inline-flex items-center gap-2 rounded-full border border-cyan-500/35 bg-cyan-950/60 px-3.5 py-1 text-xs font-semibold uppercase tracking-widest text-cyan-300">
-            <span className="h-2 w-2 rounded-full bg-cyan-400" />
-            Local-First Crew Health &amp; Telemetry Workspace
-          </div>
           <h1 className="mx-auto max-w-4xl text-2xl font-bold tracking-tight text-white sm:text-3xl md:text-4xl">
             TUMI-HEALT · Astronaut Health System
           </h1>
@@ -193,9 +189,6 @@ export function WelcomePage() {
             >
               <div className="space-y-6 lg:col-span-6">
                 <div className="inline-flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wider text-cyan-300">
-                  <span className="rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1">
-                    100% On-Device IndexedDB
-                  </span>
                   <span className="rounded-md border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-slate-300">
                     NASA OSDR &amp; HRP Grounded
                   </span>
@@ -354,11 +347,6 @@ export function WelcomePage() {
                       </p>
                     </div>
                   </div>
-                </div>
-
-                <div className="relative z-10 mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/80 pt-3 text-xs text-slate-300">
-                  <span>Zero external telemetry transmission · Offline-capable PWA</span>
-                  <span className="font-mono text-cyan-300">SHA-256 Verified Local Storage</span>
                 </div>
               </div>
             </section>
