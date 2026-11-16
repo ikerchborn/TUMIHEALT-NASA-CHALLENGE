@@ -341,9 +341,7 @@ export function evaluateIndicatorClinicalSeverity(params: {
       };
     }
     if (
-      absPct >= 8 ||
-      !withinOneSd ||
-      latestValue < 12.8 ||
+      absPct >= 15 ||
       assessmentStatus === 'REVIEW_REQUIRED'
     ) {
       return {

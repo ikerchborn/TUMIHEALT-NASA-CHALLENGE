@@ -62,6 +62,46 @@
   fill: #22d3ee;
 }
 
+/* Severity color-coding for anatomical hotspot pins */
+.body-figure-svg .body-figure-hotspot[data-severity='nominal'] .dot {
+  fill: #10b981;
+}
+.body-figure-svg .body-figure-hotspot[data-severity='nominal'] .ring {
+  stroke: #10b981;
+}
+.body-figure-svg .body-figure-leaders path[data-severity='nominal'] {
+  stroke: #10b981;
+}
+
+.body-figure-svg .body-figure-hotspot[data-severity='attention'] .dot {
+  fill: #f59e0b;
+}
+.body-figure-svg .body-figure-hotspot[data-severity='attention'] .ring {
+  stroke: #f59e0b;
+}
+.body-figure-svg .body-figure-leaders path[data-severity='attention'] {
+  stroke: #f59e0b;
+}
+
+.body-figure-svg .body-figure-hotspot[data-severity='alert'] .dot {
+  fill: #f43f5e;
+}
+.body-figure-svg .body-figure-hotspot[data-severity='alert'] .ring {
+  stroke: #f43f5e;
+}
+.body-figure-svg .body-figure-leaders path[data-severity='alert'] {
+  stroke: #f43f5e;
+}
+
+.body-figure-svg .body-figure-hotspot[data-severity='educational'] .dot,
+.body-figure-svg .body-figure-hotspot[data-severity='insufficient'] .dot {
+  fill: #38bdf8;
+}
+.body-figure-svg .body-figure-hotspot[data-severity='educational'] .ring,
+.body-figure-svg .body-figure-hotspot[data-severity='insufficient'] .ring {
+  stroke: #38bdf8;
+}
+
 .body-figure-svg .body-figure-hotspot .focus-ring {
   fill: none;
   stroke: #fff;

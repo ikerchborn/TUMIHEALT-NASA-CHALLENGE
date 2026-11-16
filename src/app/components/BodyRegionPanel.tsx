@@ -3,14 +3,16 @@ import { Link } from 'react-router-dom';
 import {
   GUIDANCE_CATALOG,
   computePersonalBaseline,
+  evaluateIndicatorClinicalSeverity,
+  formatClinicalUnit,
+  formatPercentageShift,
   getIndicatorMetadata,
   getRecords,
   listIndicatorsByCategory,
   runSelfAssessment,
 } from '@/services';
 import type { HealthCategory, HealthRecord, PersonalBaselineResult, SelfAssessmentResult } from '@/types';
-import { Alert, OriginBadge, StatusBadge } from './ui';
-import type { HealthStatus } from './ui';
+import { Alert, OriginBadge, StatusBadge, clinicalSeverityToHealthStatus } from './ui';
 
 export type BodyRegionId = HealthCategory | 'bones_muscles';
 
@@ -51,9 +53,11 @@ const REGION_META: Record<
 export function BodyRegionPanel({
   region,
   astronautId,
+  onBackToSummary,
 }: {
   region: BodyRegionId;
   astronautId?: string;
+  onBackToSummary?: () => void;
 }) {
   const [selectedIndicator, setSelectedIndicator] = useState<string>('');
   const [latestRecord, setLatestRecord] = useState<HealthRecord | null>(null);
@@ -114,6 +118,15 @@ export function BodyRegionPanel({
     return (
       <div className="flex h-full flex-col justify-between rounded-xl border border-slate-800 bg-slate-900/60 p-5">
         <div className="space-y-4">
+          {onBackToSummary && (
+            <button
+              type="button"
+              onClick={onBackToSummary}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-1.5 text-xs font-semibold text-cyan-200 transition hover:border-cyan-500/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+            >
+              ← View All-Systems Summary
+            </button>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <p className="text-sm font-bold uppercase tracking-widest text-amber-400">Educational Module</p>
@@ -167,19 +180,34 @@ export function BodyRegionPanel({
   const regionInfo = REGION_META[region];
   const meta = selectedIndicator ? getIndicatorMetadata(selectedIndicator) : undefined;
   const guidance = GUIDANCE_CATALOG.find((g) => g.category === region) ?? GUIDANCE_CATALOG[3];
-  const status: HealthStatus =
-    assessment?.assessment_status === 'INFORMATIONAL'
-      ? 'within-usual-range'
-      : assessment?.assessment_status === 'REVIEW_REQUIRED'
-        ? 'different-from-usual'
-        : assessment?.assessment_status === 'MONITOR' ||
-            assessment?.assessment_status === 'MEDICAL_ESCALATION'
-          ? 'review-recommended'
-          : 'not-enough-data';
+  const diastolicValue =
+    latestRecord?.category === 'cardiovascular'
+      ? (latestRecord.blood_pressure?.diastolic ?? null)
+      : null;
+  const clinical = evaluateIndicatorClinicalSeverity({
+    indicator: selectedIndicator,
+    category: region,
+    latestValue: latestRecord?.value ?? null,
+    diastolicValue,
+    baseline: baseline ?? undefined,
+    assessmentStatus: assessment?.assessment_status,
+  });
+  const status = clinicalSeverityToHealthStatus(clinical.severity);
+  const displayUnit = formatClinicalUnit(latestRecord?.unit, selectedIndicator);
+  const pctFormatted = formatPercentageShift(baseline?.period_comparison.percentage_change);
 
   return (
     <div className="flex h-full flex-col justify-between rounded-xl border border-slate-800 bg-slate-900/60 p-5">
       <div className="space-y-3.5">
+        {onBackToSummary && (
+          <button
+            type="button"
+            onClick={onBackToSummary}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-1.5 text-xs font-semibold text-cyan-200 transition hover:border-cyan-500/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+          >
+            ← View All-Systems Summary
+          </button>
+        )}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-sm font-bold uppercase tracking-widest text-cyan-400">Selected Body Region</p>
@@ -240,7 +268,11 @@ export function BodyRegionPanel({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <span className="font-mono text-base font-semibold text-cyan-300">
-                    {latestRecord.value ?? 'Missing'} {latestRecord.unit}
+                    {latestRecord.category === 'cardiovascular' &&
+                    (selectedIndicator === 'systolic_blood_pressure' || selectedIndicator === 'blood_pressure') &&
+                    latestRecord.blood_pressure
+                      ? `${latestRecord.blood_pressure.systolic}/${latestRecord.blood_pressure.diastolic} mmHg`
+                      : `${latestRecord.value ?? 'Missing'} ${displayUnit}`}
                   </span>
                   <span className="ml-2 text-slate-400">
                     on {new Date(latestRecord.timestamp).toLocaleDateString('en-US')}
@@ -248,19 +280,20 @@ export function BodyRegionPanel({
                 </div>
                 <OriginBadge origin={latestRecord.data_origin} />
               </div>
-              <StatusBadge status={status} />
+              <StatusBadge status={status} label={clinical.badgeLabel} />
               {baseline && (
                 <p className="text-slate-400">
                   {baseline.status === 'insufficient_data'
                     ? `Insufficient data for a personal baseline (${baseline.valid_count} of 3 valid samples).`
-                    : `Personal median ${baseline.median?.toFixed(2)} ${baseline.unit} across ${baseline.valid_count} samples.`}
+                    : `Personal median ${baseline.median?.toFixed(2)} ${formatClinicalUnit(baseline.unit, selectedIndicator)} across ${baseline.valid_count} samples${pctFormatted ? ` (${pctFormatted} recent shift)` : ''}.`}
                 </p>
               )}
-              {assessment && (
-                <p className="text-slate-300">
-                  <strong>Next step:</strong> {assessment.recommended_next_action}
-                </p>
-              )}
+              <p className="text-slate-300">
+                <strong className="text-cyan-300">Spaceflight Context:</strong> {clinical.spaceflightContext}
+              </p>
+              <p className="text-cyan-100">
+                <strong className="text-cyan-300">NASA Countermeasure:</strong> {clinical.countermeasure}
+              </p>
             </div>
           )}
         </div>

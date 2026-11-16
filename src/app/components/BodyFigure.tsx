@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { getRecords } from '@/services';
+import { getRecords, type ClinicalSeverity } from '@/services';
 import type { HealthCategory } from '@/types';
 import type { BodyRegionId } from './BodyRegionPanel';
 import prototypeHtml from '../../../docs/design/body-figure-prototype.html?raw';
@@ -10,6 +10,7 @@ type BodyFigureProps = {
   selected: BodyRegionId | null;
   onSelect?: (region: BodyRegionId) => void;
   astronautId?: string;
+  systemSeverities?: Partial<Record<BodyRegionId, ClinicalSeverity | 'educational'>>;
   interactive?: boolean;
   calmGlow?: boolean;
   className?: string;
@@ -82,6 +83,7 @@ export function BodyFigure({
   selected,
   onSelect,
   astronautId,
+  systemSeverities,
   interactive = true,
   calmGlow = false,
   className = '',
@@ -155,29 +157,40 @@ export function BodyFigure({
         {interactive && (
           <>
             <g className="body-figure-leaders" aria-hidden="true" fill="none" strokeWidth="1.2">
-              {SYSTEMS.map((system) => (
-                <path
-                  key={system.id}
-                  d={system.leader}
-                  className={selected === system.id ? 'is-selected' : undefined}
-                  data-system={system.id}
-                />
-              ))}
+              {SYSTEMS.map((system) => {
+                const severity =
+                  systemSeverities?.[system.id] ??
+                  (system.id === 'bones_muscles' ? 'educational' : 'insufficient');
+                return (
+                  <path
+                    key={system.id}
+                    d={system.leader}
+                    className={selected === system.id ? 'is-selected' : undefined}
+                    data-system={system.id}
+                    data-severity={severity}
+                  />
+                );
+              })}
             </g>
 
             <g className="body-figure-hotspots">
-              {SYSTEMS.map((system) => (
-                <g
-                  key={system.id}
-                  className="body-figure-hotspot"
-                  data-system={system.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={system.accessibleName}
-                  aria-pressed={selected === system.id}
-                  onClick={() => onSelect?.(system.id)}
-                  onKeyDown={(event) => activate(event, system.id)}
-                >
+              {SYSTEMS.map((system) => {
+                const severity =
+                  systemSeverities?.[system.id] ??
+                  (system.id === 'bones_muscles' ? 'educational' : 'insufficient');
+                return (
+                  <g
+                    key={system.id}
+                    className="body-figure-hotspot"
+                    data-system={system.id}
+                    data-severity={severity}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={system.accessibleName}
+                    aria-pressed={selected === system.id}
+                    onClick={() => onSelect?.(system.id)}
+                    onKeyDown={(event) => activate(event, system.id)}
+                  >
                   <circle
                     className="hit-area"
                     cx={system.hotspot.x}
@@ -188,7 +201,8 @@ export function BodyFigure({
                   <circle className="ring" cx={system.hotspot.x} cy={system.hotspot.y} r="16" />
                   <circle className="dot" cx={system.hotspot.x} cy={system.hotspot.y} r="6" />
                 </g>
-              ))}
+                );
+              })}
             </g>
 
             <g className="body-figure-labels">

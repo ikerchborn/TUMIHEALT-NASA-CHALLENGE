@@ -9,6 +9,7 @@ import {
   getSpaceflightProtocol,
 } from '@/services';
 import type { BloodRecord, CardiovascularRecord, SleepRecord } from '@/types';
+import { buildBodySystemSummaries } from '@/app/components/MissionBodyStatusSummary';
 
 function makeSleepRecord(id: string, ts: string, hours: number | null): SleepRecord {
   return {
@@ -178,5 +179,32 @@ describe('Spaceflight Clinical Protocol & Severity System', () => {
 
     expect(result.recommended_next_action).not.toContain('Review excluded entries');
     expect(result.recommended_next_action).toContain('NASA Circadian Light Protocol');
+  });
+
+  it('builds prioritized Body Explorer system summaries with severity counts', () => {
+    const records = [
+      makeSleepRecord('s1', '2026-10-01T08:00:00Z', 7.5),
+      makeSleepRecord('s2', '2026-10-10T08:00:00Z', 7.4),
+      makeSleepRecord('s3', '2026-10-20T08:00:00Z', 7.6),
+      makeSleepRecord('s4', '2026-10-30T08:00:00Z', 5.05),
+      makeBpRecord('bp1', '2026-10-01T08:00:00Z', 120, 76),
+      makeBpRecord('bp2', '2026-10-10T08:00:00Z', 122, 78),
+      makeBpRecord('bp3', '2026-10-20T08:00:00Z', 122, 78),
+      makeBpRecord('bp4', '2026-10-30T08:00:00Z', 134, 85),
+      makeHgbRecord('h1', '2026-10-01T08:00:00Z', 13.8),
+      makeHgbRecord('h2', '2026-10-10T08:00:00Z', 13.5),
+      makeHgbRecord('h3', '2026-10-20T08:00:00Z', 12.9),
+      makeHgbRecord('h4', '2026-10-30T08:00:00Z', 12.38),
+    ];
+
+    const summary = buildBodySystemSummaries(records, 'astro-test');
+    expect(summary.deviationCount).toBe(2);
+    expect(summary.nominalCount).toBe(1);
+    expect(summary.severities.sleep).toBe('attention');
+    expect(summary.severities.cardiovascular).toBe('attention');
+    expect(summary.severities.blood).toBe('nominal');
+    expect(summary.severities.bones_muscles).toBe('educational');
+    expect(summary.items[0].id).not.toBe('blood');
+    expect(summary.items[3].id).toBe('bones_muscles');
   });
 });

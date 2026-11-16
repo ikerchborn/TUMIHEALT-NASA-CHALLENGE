@@ -1,7 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { getRecords, type ClinicalSeverity } from '@/services';
+import type { HealthRecord } from '@/types';
 import { BodyRegionPanel, type BodyRegionId } from '../components/BodyRegionPanel';
 import { BodyFigure } from '../components/BodyFigure';
+import {
+  MissionBodyStatusSummary,
+  buildBodySystemSummaries,
+} from '../components/MissionBodyStatusSummary';
 import { Alert, Button, Card, PageHeader } from '../components/ui';
 import { MedicalReviewDrawer } from '../components/MedicalReviewDrawer';
 import { useProfile } from '../context/ProfileContext';
@@ -13,10 +19,52 @@ const regions: Array<{ id: BodyRegionId; label: string; detail: string }> = [
   { id: 'bones_muscles', label: 'Bones and muscles', detail: 'Educational, not monitored' },
 ];
 
+function severityDotClass(severity: ClinicalSeverity | 'educational'): string {
+  switch (severity) {
+    case 'nominal':
+      return 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]';
+    case 'attention':
+      return 'bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.8)]';
+    case 'alert':
+      return 'bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.85)]';
+    case 'educational':
+    case 'insufficient':
+    default:
+      return 'bg-cyan-400/80';
+  }
+}
+
 export function BodyExplorerPage() {
   const { active, isDemoMode } = useProfile();
   const [selected, setSelected] = useState<BodyRegionId | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [records, setRecords] = useState<HealthRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!active?.astronaut_id) {
+      setRecords([]);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    void getRecords({ astronaut_id: active.astronaut_id })
+      .then((recs) => {
+        if (!cancelled) setRecords(recs);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active?.astronaut_id]);
+
+  const { severities } = useMemo(
+    () => buildBodySystemSummaries(records, active?.astronaut_id),
+    [records, active?.astronaut_id],
+  );
 
   return (
     <div className="flex flex-col gap-section">
@@ -50,11 +98,14 @@ export function BodyExplorerPage() {
               selected={selected}
               onSelect={setSelected}
               astronautId={active?.astronaut_id}
+              systemSeverities={severities}
               interactive
             />
           </div>
 
-          <p className="mt-3 text-sm text-slate-400">Dots are body areas you can select.</p>
+          <p className="mt-3 text-sm text-slate-400">
+            Dots are color-coded by clinical severity (Amber: attention, Green: nominal, Cyan: educational).
+          </p>
 
           <div className="mt-4">
             <h3 className="text-sm font-semibold text-white">Body regions</h3>
@@ -71,7 +122,13 @@ export function BodyExplorerPage() {
                         : 'border-mission-border bg-mission-canvas text-slate-300 hover:bg-mission-surface-raised'
                     }`}
                   >
-                    <span className="block font-medium">{region.label}</span>
+                    <span className="flex items-center gap-2 font-medium">
+                      <span
+                        aria-hidden="true"
+                        className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${severityDotClass(severities[region.id])}`}
+                      />
+                      {region.label}
+                    </span>
                     <span className="mt-0.5 block text-slate-400">{region.detail}</span>
                   </button>
                 </li>
@@ -81,16 +138,18 @@ export function BodyExplorerPage() {
         </Card>
 
         {selected ? (
-          <BodyRegionPanel region={selected} astronautId={active?.astronaut_id} />
+          <BodyRegionPanel
+            region={selected}
+            astronautId={active?.astronaut_id}
+            onBackToSummary={() => setSelected(null)}
+          />
         ) : (
-          <div className="flex min-h-48 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-center">
-            <div>
-              <h2 className="text-lg font-semibold text-white">Select a body system</h2>
-              <p className="mt-2 text-sm text-slate-400">
-                Choose a dot, label, or body region to see related information.
-              </p>
-            </div>
-          </div>
+          <MissionBodyStatusSummary
+            records={records}
+            astronautId={active?.astronaut_id}
+            loading={loading}
+            onSelectRegion={setSelected}
+          />
         )}
       </div>
       <MedicalReviewDrawer
