@@ -13,7 +13,6 @@ import {
   requestPersistentStorage,
   saveMissionContext,
 } from '@/services';
-import { buildSyntheticScenarioXlsx } from '@/services/demo';
 import type { AuditEvent, GravityEnvironment, LocalBackupPayload, MissionPhase } from '@/types';
 import type { LocalStorageInfo } from '@/services/storage';
 import { useProfile } from '../context/ProfileContext';
@@ -194,26 +193,6 @@ export function ProfilesPage() {
     }
   }
 
-  function onDownloadSyntheticScenarioXlsx() {
-    setBackupErr(null);
-    setBackupMsg(null);
-    try {
-      const workbook = buildSyntheticScenarioXlsx();
-      const blob = new Blob([workbook.content], { type: workbook.mimeType });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = workbook.fileName;
-      a.click();
-      URL.revokeObjectURL(url);
-      setBackupMsg(
-        `Downloaded ${workbook.fileName} (${workbook.sheetNames.length} sheets). Your personal profile data was not modified.`,
-      );
-    } catch (err) {
-      setBackupErr(err instanceof Error ? err.message : String(err));
-    }
-  }
-
   async function onRestoreBackup(e: ChangeEvent<HTMLInputElement>) {
     if (isDemoMode) {
       setBackupErr('Restore is unavailable in Demo Mode. Exit Demo Mode before restoring personal data.');
@@ -294,37 +273,6 @@ export function ProfilesPage() {
           )}
         </div>
       </Card>
-
-      <section
-        aria-labelledby="synthetic-scenario-heading"
-        className="rounded-xl border border-purple-400/50 bg-purple-950/35 p-5 shadow-lg shadow-purple-950/20"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="max-w-2xl space-y-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full border border-purple-400/40 bg-purple-500/20 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-purple-200">
-                Synthetic Example (.xlsx)
-              </span>
-              <h2 id="synthetic-scenario-heading" className="text-base font-semibold text-purple-100">
-                Download 90-Day Health Scenario
-              </h2>
-            </div>
-            <p className="text-sm text-purple-100/85">
-              Explore a realistic synthetic astronaut health history, including changes in sleep, nutrition, physiological indicators and laboratory results.
-            </p>
-            <p className="text-xs text-purple-200/75">
-              Downloading this workbook does not modify or insert records into your personal health profile.
-            </p>
-          </div>
-          <Button
-            type="button"
-            onClick={onDownloadSyntheticScenarioXlsx}
-            className="border border-purple-300/40 bg-purple-600 text-white hover:bg-purple-500 focus-visible:outline-purple-300"
-          >
-            Download Excel Dataset (.xlsx)
-          </Button>
-        </div>
-      </section>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
         <Card title="New Profile">

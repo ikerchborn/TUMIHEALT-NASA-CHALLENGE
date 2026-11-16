@@ -328,32 +328,31 @@ test('final UX improvements: welcome title & 6 team cards, one-click 90d demo, e
   });
 });
 
-test('Personal Profile provides purple 90-day synthetic .xlsx scenario download without modifying profile data', async ({ page }) => {
+test('Explore 90-Day Demo loads complete scenario in isolated Demo Mode and Excel card is absent from My Mission & Privacy', async ({ page }) => {
   await createPersonalProfile(page);
+
+  // 1. Verify Excel download card is removed from /profiles (My Mission & Privacy)
   await page.goto('/profiles');
+  await expect(page.getByText('Download 90-Day Health Scenario')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Download Excel Dataset (.xlsx)' })).toHaveCount(0);
 
-  const section = page.locator('section', { hasText: 'Download 90-Day Health Scenario' });
-  await expect(section).toBeVisible();
-  await expect(
-    section.getByText(
-      'Explore a realistic synthetic astronaut health history, including changes in sleep, nutrition, physiological indicators and laboratory results.',
-    ),
-  ).toBeVisible();
-
-  const downloadBtn = section.getByRole('button', { name: 'Download Excel Dataset (.xlsx)' });
-  await expect(downloadBtn).toBeVisible();
-
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    downloadBtn.click(),
-  ]);
-  expect(download.suggestedFilename()).toBe('tumi-healt-90d-synthetic-astronaut-scenario.xlsx');
-
-  await expect(
-    page.getByText(/Your personal profile data was not modified/i),
-  ).toBeVisible();
-
-  // Verify personal profile remains empty on Dashboard
+  // 2. Open Mission Health Overview (/) and click Explore 90-Day Demo
   await page.goto('/');
   await expect(page.getByText('All Indicators (0)')).toBeVisible();
+  await expect(page.getByText('Explore with a Demo Astronaut')).toBeVisible();
+  await page.getByRole('button', { name: 'Explore 90-Day Demo' }).click();
+
+  // 3. Confirm 90-day synthetic dataset loads automatically
+  await expect(page.getByRole('button', { name: 'Exit Demo' }).first()).toBeVisible();
+  await expect(page.getByTestId('observation-detail-card').first()).toBeVisible();
+  await expect(page.getByText(/All Indicators \(0\)/)).toHaveCount(0);
+
+  // 4. Switch back to personal profile and confirm data remains unchanged (0 indicators)
+  await page.getByRole('button', { name: 'Exit Demo' }).first().click();
+  await expect(page.getByRole('button', { name: 'Explore 90-Day Demo' })).toBeVisible();
+  await expect(page.getByText('All Indicators (0)')).toBeVisible();
+
+  // 5. Return to Demo Mode and confirm it loads cleanly again without errors
+  await page.getByRole('button', { name: 'Explore 90-Day Demo' }).click();
+  await expect(page.getByTestId('observation-detail-card').first()).toBeVisible();
 });

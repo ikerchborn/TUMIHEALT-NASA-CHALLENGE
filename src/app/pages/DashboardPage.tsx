@@ -471,6 +471,27 @@ export function DashboardPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [showAllObservations, setShowAllObservations] = useState(false);
   const [observationFilter, setObservationFilter] = useState<'attention' | 'all'>('attention');
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [demoError, setDemoError] = useState<string | null>(null);
+  const [demoReadyMsg, setDemoReadyMsg] = useState<string | null>(null);
+
+  async function onExploreDemo() {
+    setDemoLoading(true);
+    setDemoError(null);
+    setDemoReadyMsg(null);
+    try {
+      await enterDemoMode();
+      setDemoReadyMsg('90-day synthetic astronaut scenario loaded in isolated Demo Mode.');
+    } catch (err) {
+      setDemoError(
+        err instanceof Error
+          ? `Could not load the 90-day synthetic demo: ${err.message}`
+          : 'Could not load the 90-day synthetic demo.',
+      );
+    } finally {
+      setDemoLoading(false);
+    }
+  }
   const id = active?.astronaut_id;
   const today = localDateKey();
 
@@ -682,32 +703,44 @@ export function DashboardPage() {
         >
           <div className="space-y-4">
             <p className="text-sm leading-relaxed text-slate-300">
-              Your personal profile (<strong className="text-white">{active?.display_name}</strong>) is currently empty. You can import CSV, XML, or XLSX measurements (or download ready-to-import 90-day synthetic CSV files on the Import page), complete a daily check-in, or switch to the isolated 90-day Demo Astronaut profile.
+              Your personal profile (<strong className="text-white">{active?.display_name}</strong>) is currently empty. You can import CSV, XML, or XLSX measurements, complete a daily check-in, or switch to the isolated 90-day Demo Astronaut profile.
             </p>
-            <div className="flex flex-wrap items-center gap-3">
-              <Link
-                to="/import"
-                className="rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
-              >
-                Import data
-              </Link>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => void enterDemoMode()}
-                className="border-violet-500/50 bg-violet-950/60 text-violet-100 hover:bg-violet-900/70"
-              >
-                Explore with a demo astronaut (90-Day Synthetic Data)
-              </Button>
-              <Link
-                to="/check-in"
-                className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-200 hover:border-cyan-500/50"
-              >
-                Complete Daily Check-In
-              </Link>
+            <div className="rounded-xl border border-violet-500/40 bg-violet-950/35 p-4 space-y-2.5">
+              <p className="text-sm font-semibold text-violet-100">Explore with a Demo Astronaut</p>
+              <p className="text-sm leading-relaxed text-violet-100/85">
+                Load a complete 90-day synthetic astronaut health scenario and explore how TUMI-HEALT identifies changes in sleep, cardiovascular indicators, laboratory results and daily health assessments.
+              </p>
+              {demoError && <Alert kind="error">{demoError}</Alert>}
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={demoLoading}
+                  onClick={() => void onExploreDemo()}
+                  className="border-violet-400/50 bg-violet-700 text-white hover:bg-violet-600"
+                >
+                  {demoLoading ? 'Loading 90-Day Demo…' : 'Explore 90-Day Demo'}
+                </Button>
+                <Link
+                  to="/import"
+                  className="rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+                >
+                  Import data
+                </Link>
+                <Link
+                  to="/check-in"
+                  className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-200 hover:border-cyan-500/50"
+                >
+                  Complete Daily Check-In
+                </Link>
+              </div>
             </div>
           </div>
         </Card>
+      )}
+
+      {isDemoMode && demoReadyMsg && (
+        <Alert kind="info">{demoReadyMsg}</Alert>
       )}
 
       {/* Key Vital & Biomarker Summary Cards */}

@@ -61,6 +61,13 @@ describe('demo mode isolation', () => {
     expect(demoRecords.some((r) => r.category === 'blood')).toBe(true);
     expect(demoRecords.some((r) => r.category === 'sleep')).toBe(true);
     expect(demoRecords.some((r) => r.category === 'cardiovascular')).toBe(true);
+    expect(new Set(demoRecords.map((r) => r.indicator)).size).toBe(52);
+
+    // Repeated call must not duplicate records
+    await ensureDemoProfileAndData();
+    const afterSecondCall = await getRecords({ astronaut_id: DEMO_ASTRONAUT_ID });
+    expect(afterSecondCall).toHaveLength(demoRecords.length);
+
     const demoCheckIn = await getDailyCheckIn(DEMO_ASTRONAUT_ID, getLocalCheckInDate());
     expect(demoCheckIn?.data_origin).toBe('SYNTHETIC');
     expect(demoCheckIn?.source).toBe('synthetic_demo_fixture');

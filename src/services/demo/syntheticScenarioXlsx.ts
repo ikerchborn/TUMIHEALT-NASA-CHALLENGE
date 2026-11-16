@@ -412,7 +412,7 @@ function buildDailyCheckInSheet(referenceDate: Date): Array<Array<string | numbe
     else if (day > 68 && day <= 80) mood = day % 4 === 0 ? 'unwell' : 'very_fatigued';
     else if (day > 80) mood = day % 2 === 0 ? 'unwell' : 'very_fatigued';
 
-    const energy = Math.round(clamp(8.8 - p * 6.4 + Math.sin(day * 0.5) * 0.5, 1, 10));
+    const energy = Math.round(clamp(4.8 - p * 3.4 + Math.sin(day * 0.5) * 0.3, 1, 5));
 
     const symptoms: DailyCheckInSymptom[] = [];
     if (day >= 42 && day <= 60 && day % 5 === 0) {
@@ -497,15 +497,92 @@ function buildDataDictionarySheet(): Array<Array<string | number>> {
     'daily_check_in (mood, energy_level, symptoms, note)',
     'Daily Self-Assessment & Nutrition/Hydration Notes',
     'self_assessment',
-    'categorical / 1-10 scale / text',
+    'categorical / 1-5 scale / text',
     'contextual_self_report',
     'Daily (Days 1-90)',
     'SYNTHETIC',
-    'Structured astronaut daily self-report (mood, energy_level 1-10, symptoms) plus synthetic self-reported food intake and hydration observations in note.',
+    'Structured astronaut daily self-report (mood, energy_level 1-5, symptoms) plus synthetic self-reported food intake and hydration observations in note.',
     'Nutrition and hydration are not supported as quantitative indicators in TUMI-HEALT and are not imported via the measurement CSV/XLSX importer.',
   ]);
 
   return rows;
+}
+
+export interface SyntheticDailyCheckInSeed {
+  checkin_date: string;
+  mood: DailyCheckInMood;
+  energy_level: number;
+  symptoms: DailyCheckInSymptom[];
+  note: string;
+}
+
+export interface GeneratedSyntheticScenarioDataset {
+  cardiovascularCsv: string;
+  sleepCsv: string;
+  bloodCsv: string;
+  dailyCheckIns: SyntheticDailyCheckInSeed[];
+}
+
+function toCsvCell(cell: string | number): string {
+  const s = String(cell);
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function sheetRowsToCsv(
+  rows: Array<Array<string | number>>,
+  astronautIdOverride?: string,
+  astronautColIdx = 0,
+): string {
+  return rows
+    .map((row, rowIdx) => {
+      const next =
+        rowIdx > 0 && astronautIdOverride
+          ? row.map((val, colIdx) => (colIdx === astronautColIdx ? astronautIdOverride : val))
+          : row;
+      return next.map(toCsvCell).join(',');
+    })
+    .join('\n');
+}
+
+/**
+ * Reusable 90-day 3-stage synthetic scenario dataset builder for Demo Mode and CSV/XLSX flows.
+ * Covers all 52 supported quantitative indicators plus 90 daily self-assessments.
+ */
+export function buildSyntheticScenarioDataset(
+  astronautId: string = SYNTHETIC_SCENARIO_ASTRONAUT_ID,
+  referenceDate: Date = new Date(),
+): GeneratedSyntheticScenarioDataset {
+  const cvRows = buildCardiovascularSheet(referenceDate);
+  const sleepRows = buildSleepSheet(referenceDate);
+  const bloodRows = buildBloodLabsSheet(referenceDate);
+  const checkInRows = buildDailyCheckInSheet(referenceDate);
+
+  const dailyCheckIns: SyntheticDailyCheckInSeed[] = checkInRows.slice(1).map((r) => {
+    const rawSymptoms = String(r[5] ?? '').trim();
+    const symptoms = rawSymptoms
+      ? (rawSymptoms
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean) as DailyCheckInSymptom[])
+      : [];
+    return {
+      checkin_date: String(r[2]),
+      mood: r[3] as DailyCheckInMood,
+      energy_level: Number(r[4]),
+      symptoms,
+      note: String(r[7] ?? ''),
+    };
+  });
+
+  return {
+    cardiovascularCsv: sheetRowsToCsv(cvRows, astronautId, 0),
+    sleepCsv: sheetRowsToCsv(sleepRows, astronautId, 0),
+    bloodCsv: sheetRowsToCsv(bloodRows, astronautId, 0),
+    dailyCheckIns,
+  };
 }
 
 export interface GeneratedSyntheticScenarioXlsx {

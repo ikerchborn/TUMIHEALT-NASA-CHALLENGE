@@ -1,8 +1,7 @@
 import type {
-  BloodRecord,
-  CardiovascularRecord,
+  CsvColumnMapping,
+  HealthCategory,
   LocalAstronautProfile,
-  SleepRecord,
 } from '@/types';
 import {
   createLocalProfile,
@@ -12,7 +11,15 @@ import {
 import { getLatestMissionContext, saveMissionContext } from '../missionContext';
 import { getDatabase, getProfile } from '../storage';
 import { getDailyCheckIn, getLocalCheckInDate, saveDailyCheckIn } from '../checkIn';
-import { buildSynthetic90DayRecords } from './syntheticDataset90d';
+import {
+  confirmCsvImport,
+  inspectCsvFile,
+  prepareCsvImportPreview,
+} from '../ingestion/csvImportService';
+import {
+  SYNTHETIC_SCENARIO_SOURCE,
+  buildSyntheticScenarioDataset,
+} from './syntheticScenarioXlsx';
 
 export const DEMO_ASTRONAUT_ID = 'demo-astronaut';
 
@@ -26,9 +33,20 @@ function dateDaysAgo(daysAgo: number): string {
   return getLocalCheckInDate(date);
 }
 
+function buildCanonicalMapping(headers: string[]): CsvColumnMapping {
+  return {
+    ...Object.fromEntries(headers.map((h) => [h, h])),
+    timestamp: 'timestamp',
+    indicator: 'indicator',
+    value: 'value',
+    unit: 'unit',
+  };
+}
+
 /**
- * Ensures an isolated, deterministic 90-day synthetic demonstration profile and
- * measurements exist in IndexedDB. Never touches real user profiles.
+ * Ensures an isolated, deterministic 90-day 3-stage synthetic demonstration profile and
+ * measurements exist in IndexedDB by running the dataset through the real ingestion and
+ * validation services. Never touches real user profiles.
  */
 export async function ensureDemoProfileAndData(): Promise<LocalAstronautProfile> {
   let profile = await getProfile(DEMO_ASTRONAUT_ID);
@@ -52,66 +70,99 @@ export async function ensureDemoProfileAndData(): Promise<LocalAstronautProfile>
     });
   }
 
+  const dataset = buildSyntheticScenarioDataset(DEMO_ASTRONAUT_ID);
+
+  // Seed daily check-ins (Days 1-90 + today) without duplicating existing dates
+  for (const entry of dataset.dailyCheckIns) {
+    if (!(await getDailyCheckIn(DEMO_ASTRONAUT_ID, entry.checkin_date))) {
+      await saveDailyCheckIn({
+        profile_id: DEMO_ASTRONAUT_ID,
+        checkin_date: entry.checkin_date,
+        mood: entry.mood,
+        energy_level: entry.energy_level,
+        symptoms: entry.symptoms,
+        note: entry.note,
+        data_origin: 'SYNTHETIC',
+        source: 'synthetic_demo_fixture',
+      });
+    }
+  }
+
   const today = getLocalCheckInDate();
-  if (!(await getDailyCheckIn(DEMO_ASTRONAUT_ID, dateDaysAgo(5)))) {
-    await saveDailyCheckIn({
-      profile_id: DEMO_ASTRONAUT_ID,
-      checkin_date: dateDaysAgo(5),
-      mood: 'very_fatigued',
-      energy_level: 2,
-      symptoms: ['headache'],
-      note: 'Synthetic check-in: mild headache after long docking schedule.',
-      data_origin: 'SYNTHETIC',
-      source: 'synthetic_demo_fixture',
-    });
-  }
-  if (!(await getDailyCheckIn(DEMO_ASTRONAUT_ID, dateDaysAgo(1)))) {
-    await saveDailyCheckIn({
-      profile_id: DEMO_ASTRONAUT_ID,
-      checkin_date: dateDaysAgo(1),
-      mood: 'a_bit_tired',
-      energy_level: 3,
-      symptoms: [],
-      note: 'Synthetic check-in: shorter sleep cycle during cargo docking schedule.',
-      data_origin: 'SYNTHETIC',
-      source: 'synthetic_demo_fixture',
-    });
-  }
   if (!(await getDailyCheckIn(DEMO_ASTRONAUT_ID, today))) {
     await saveDailyCheckIn({
       profile_id: DEMO_ASTRONAUT_ID,
       checkin_date: today,
-      mood: 'good',
-      energy_level: 4,
-      symptoms: [],
-      note: 'Synthetic check-in: feeling rested after scheduled recovery window.',
+      mood: 'very_fatigued',
+      energy_level: 2,
+      symptoms: ['headache', 'dizziness'],
+      note: 'SYNTHETIC self-report: Continued fatigue and irregular hydration following 90-day deterioration scenario.',
       data_origin: 'SYNTHETIC',
       source: 'synthetic_demo_fixture',
     });
   }
 
   const existing = await getRecords({ astronaut_id: DEMO_ASTRONAUT_ID });
-  if (existing.length > 0) {
+  if (
+    existing.length > 0 &&
+    existing.some((r) => r.source_dataset === SYNTHETIC_SCENARIO_SOURCE)
+  ) {
     return profile;
   }
 
-  const syntheticRecords = buildSynthetic90DayRecords(DEMO_ASTRONAUT_ID);
-  const bloodRecords = syntheticRecords.filter((r): r is BloodRecord => r.category === 'blood');
-  const sleepRecords = syntheticRecords.filter((r): r is SleepRecord => r.category === 'sleep');
-  const cvRecords = syntheticRecords.filter(
-    (r): r is CardiovascularRecord => r.category === 'cardiovascular',
-  );
+  // Safely reset only demo records if an older/partial demo dataset was present
+  if (existing.length > 0) {
+    const db = getDatabase();
+    await db.transaction(
+      'rw',
+      [db.blood_records, db.sleep_records, db.cardiovascular_records],
+      async () => {
+        await db.blood_records.where('astronaut_id').equals(DEMO_ASTRONAUT_ID).delete();
+        await db.sleep_records.where('astronaut_id').equals(DEMO_ASTRONAUT_ID).delete();
+        await db.cardiovascular_records.where('astronaut_id').equals(DEMO_ASTRONAUT_ID).delete();
+      },
+    );
+  }
 
-  const db = getDatabase();
-  await db.transaction(
-    'rw',
-    [db.blood_records, db.sleep_records, db.cardiovascular_records],
-    async () => {
-      await db.blood_records.bulkPut(bloodRecords);
-      await db.sleep_records.bulkPut(sleepRecords);
-      await db.cardiovascular_records.bulkPut(cvRecords);
+  const imports: Array<{ category: HealthCategory; fileName: string; csvText: string }> = [
+    { category: 'sleep', fileName: 'demo-90d-sleep.csv', csvText: dataset.sleepCsv },
+    {
+      category: 'cardiovascular',
+      fileName: 'demo-90d-cardiovascular.csv',
+      csvText: dataset.cardiovascularCsv,
     },
-  );
+    { category: 'blood', fileName: 'demo-90d-blood-labs.csv', csvText: dataset.bloodCsv },
+  ];
+
+  try {
+    for (const item of imports) {
+      const inspection = inspectCsvFile(item.csvText, item.fileName);
+      const preview = await prepareCsvImportPreview({
+        profileId: DEMO_ASTRONAUT_ID,
+        actorId: DEMO_ASTRONAUT_ID,
+        category: item.category,
+        fileName: item.fileName,
+        fileFormat: 'csv',
+        csvText: item.csvText,
+        dataOrigin: 'SYNTHETIC',
+        sourceDataset: SYNTHETIC_SCENARIO_SOURCE,
+        mapping: buildCanonicalMapping(inspection.headers),
+        allowDuplicate: true,
+      });
+
+      if (preview.invalid_rows.length > 0) {
+        throw new Error(
+          `Demo dataset validation failed for ${item.category}: ${preview.invalid_rows.length} invalid row(s).`,
+        );
+      }
+
+      await confirmCsvImport(preview);
+    }
+  } catch (err) {
+    // Roll back only the isolated demo profile so no partial records remain
+    await clearDemoProfileAndData();
+    throw err;
+  }
 
   return profile;
 }
