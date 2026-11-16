@@ -141,41 +141,67 @@ export type HealthStatus =
   | 'review-recommended'
   | 'not-enough-data';
 
-const healthStatusMeta: Record<HealthStatus, { label: string; icon: IconName; className: string }> = {
+const healthStatusMeta: Record<HealthStatus, { label: string; icon: IconName; className: string; borderClass: string }> = {
   'within-usual-range': {
-    label: 'Within your usual range',
+    label: 'Nominal',
     icon: 'check-in',
-    className: 'border-cyan-700/70 bg-cyan-950/50 text-cyan-100',
+    className: 'border-emerald-600/70 bg-emerald-950/45 text-emerald-200',
+    borderClass: 'border-emerald-700/50',
   },
   'different-from-usual': {
-    label: 'Different from your usual',
+    label: 'Attention / Deviation',
     icon: 'trends',
-    className: 'border-amber-700/70 bg-amber-950/40 text-amber-100',
+    className: 'border-amber-500/80 bg-amber-950/50 text-amber-200',
+    borderClass: 'border-amber-600/65',
   },
   'review-recommended': {
-    label: 'Review recommended',
+    label: 'Action / Flight Surgeon Alert',
     icon: 'assistant',
-    className: 'border-rose-700/70 bg-rose-950/40 text-rose-100',
+    className: 'border-rose-500/80 bg-rose-950/55 text-rose-200',
+    borderClass: 'border-rose-600/70',
   },
   'not-enough-data': {
     label: 'Not enough data',
     icon: 'more',
     className: 'border-slate-600 bg-slate-900 text-slate-200',
+    borderClass: 'border-slate-800',
   },
 };
 
+export function clinicalSeverityToHealthStatus(
+  severity: 'nominal' | 'attention' | 'alert' | 'insufficient',
+): HealthStatus {
+  switch (severity) {
+    case 'nominal':
+      return 'within-usual-range';
+    case 'attention':
+      return 'different-from-usual';
+    case 'alert':
+      return 'review-recommended';
+    case 'insufficient':
+    default:
+      return 'not-enough-data';
+  }
+}
+
+export function severityBorderClass(status: HealthStatus): string {
+  return healthStatusMeta[status].borderClass;
+}
+
 export function StatusBadge({
   status,
+  label,
   className = '',
 }: {
   status: HealthStatus;
+  label?: string;
   className?: string;
 }) {
   const meta = healthStatusMeta[status];
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-pill border px-3 py-1 text-sm font-medium ${meta.className} ${className}`}>
-      <Icon name={meta.icon} className="h-4 w-4 shrink-0" />
-      {meta.label}
+    <span className={`inline-flex items-center gap-1.5 rounded-pill border px-3 py-1 text-xs font-semibold ${meta.className} ${className}`}>
+      <Icon name={meta.icon} className="h-3.5 w-3.5 shrink-0" />
+      {label ?? meta.label}
     </span>
   );
 }

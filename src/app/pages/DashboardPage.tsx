@@ -2,12 +2,18 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   calculatePersonalBaselineFromRecords,
+  evaluateIndicatorClinicalSeverity,
+  evaluateMultiSystemConsensus,
   evaluateSelfAssessmentFromRecords,
+  formatClinicalUnit,
+  formatPercentageShift,
   getDailyCheckIn,
   getIndicatorMetadata,
   getLatestMissionContext,
   getRecords,
   listDailyCheckIns,
+  type IndicatorClinicalEvaluation,
+  type MissionEnvironment,
 } from '@/services';
 import type {
   AssessmentStatus,
@@ -20,9 +26,18 @@ import type {
 import { useProfile } from '../context/ProfileContext';
 import { useAsync } from '../hooks/useAsync';
 import { buildSyntheticScenarioXlsx } from '@/services/demo';
-import { Alert, Button, Card, EmptyState, OriginBadge, StatusBadge } from '../components/ui';
+import {
+  Alert,
+  Button,
+  Card,
+  EmptyState,
+  OriginBadge,
+  StatusBadge,
+  clinicalSeverityToHealthStatus,
+  severityBorderClass,
+} from '../components/ui';
 import { MedicalReviewDrawer } from '../components/MedicalReviewDrawer';
-import type { HealthStatus } from '../components/ui';
+import { MissionHealthConsensusCard } from '../components/MissionHealthConsensusCard';
 
 interface HomeMetric {
   id: 'sleep' | 'heart-rate' | 'blood-pressure' | 'blood';
@@ -30,9 +45,13 @@ interface HomeMetric {
   category: HealthCategory;
   record?: HealthRecord;
   value?: string;
+  latestNumericValue: number | null;
+  diastolicNumericValue: number | null;
+  baselineMedianDisplay?: string;
   trendValues: number[];
   baseline?: PersonalBaselineResult;
   assessment?: SelfAssessmentResult;
+  clinical: IndicatorClinicalEvaluation;
 }
 
 interface IndicatorObservationDetail {
@@ -44,6 +63,7 @@ interface IndicatorObservationDetail {
   previousRecord?: HealthRecord;
   baseline: PersonalBaselineResult;
   assessment: SelfAssessmentResult;
+  clinical: IndicatorClinicalEvaluation;
   observationKindLabel:
     | 'Statistical Observation'
     | 'Outdated Measurement Warning'
@@ -121,28 +141,13 @@ function recordValue(record: HealthRecord): number | null {
   return record.value;
 }
 
-function assessmentStatusToHealthStatus(status: AssessmentStatus | undefined): HealthStatus {
-  switch (status) {
-    case 'INFORMATIONAL':
-      return 'within-usual-range';
-    case 'REVIEW_REQUIRED':
-      return 'different-from-usual';
-    case 'MEDICAL_ESCALATION':
-    case 'MONITOR':
-      return 'review-recommended';
-    case 'INSUFFICIENT_DATA':
-    default:
-      return 'not-enough-data';
-  }
-}
-
-function formatMetricValue(metric: HomeMetric): string | undefined {
+function formatMetricValue(metric: Pick<HomeMetric, 'id' | 'record'>): string | undefined {
   const record = metric.record;
   if (!record) return undefined;
 
   if (metric.id === 'sleep' && record.category === 'sleep') {
     const value = record.sleep_duration ?? record.value;
-    return value === null ? undefined : `${value} ${record.unit || 'hours'}`;
+    return value === null ? undefined : `${value} ${formatClinicalUnit(record.unit, 'sleep_duration')}`;
   }
   if (metric.id === 'heart-rate' && record.category === 'cardiovascular') {
     const value = record.heart_rate ?? record.value;
@@ -182,10 +187,18 @@ function metricTrendValue(metricId: HomeMetric['id'], record: HealthRecord): num
   return undefined;
 }
 
+function computeMedianValue(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
 function buildMetrics(
   records: HealthRecord[],
   astronautId: string,
   reportedSymptoms: boolean,
+  environment: MissionEnvironment,
 ): HomeMetric[] {
   const definitions: Array<Pick<HomeMetric, 'id' | 'label' | 'category'>> = [
     { id: 'sleep', label: 'Sleep', category: 'sleep' },
@@ -197,23 +210,16 @@ function buildMetrics(
   return definitions.map((definition) => {
     const matching = records.filter((record) => {
       if (definition.id === 'sleep') {
-        return (
-          record.category === 'sleep' &&
-          (record.indicator === 'sleep_duration' || record.sleep_duration !== undefined)
-        );
+        return record.category === 'sleep' && record.indicator === 'sleep_duration';
       }
       if (definition.id === 'heart-rate') {
-        return (
-          record.category === 'cardiovascular' &&
-          record.indicator === 'heart_rate'
-        );
+        return record.category === 'cardiovascular' && record.indicator === 'heart_rate';
       }
       if (definition.id === 'blood-pressure') {
         return (
           record.category === 'cardiovascular' &&
           (record.indicator === 'systolic_blood_pressure' ||
-            record.indicator === 'blood_pressure' ||
-            record.blood_pressure != null)
+            record.indicator === 'blood_pressure')
         );
       }
       return record.category === 'blood' && record.indicator === 'hemoglobin';
@@ -260,11 +266,58 @@ function buildMetrics(
         })
       : undefined;
 
+    const latestNumericValue = latest ? recordValue(latest) : null;
+    const diastolicNumericValue =
+      definition.id === 'blood-pressure' && latest?.category === 'cardiovascular'
+        ? (latest.blood_pressure?.diastolic ?? null)
+        : null;
+
+    let baselineMedianDisplay: string | undefined;
+    if (baseline && baseline.median !== null) {
+      if (definition.id === 'blood-pressure') {
+        const diaBaseline = calculatePersonalBaselineFromRecords(records, {
+          astronaut_id: astronautId,
+          category: 'cardiovascular',
+          indicator: 'diastolic_blood_pressure',
+        });
+        const embeddedDiaMedian = computeMedianValue(
+          nonNullMatching
+            .map((r) => (r.category === 'cardiovascular' ? r.blood_pressure?.diastolic : undefined))
+            .filter((v): v is number => typeof v === 'number' && Number.isFinite(v)),
+        );
+        const diaMedian = diaBaseline.median ?? embeddedDiaMedian;
+        baselineMedianDisplay =
+          diaMedian !== null
+            ? `${Math.round(baseline.median)}/${Math.round(diaMedian)} mmHg`
+            : `${Math.round(baseline.median)} mmHg`;
+      } else {
+        const unitLabel = formatClinicalUnit(baseline.unit, targetIndicator);
+        const formattedMedian = Number.isInteger(baseline.median)
+          ? String(baseline.median)
+          : baseline.median.toFixed(2);
+        baselineMedianDisplay = `${formattedMedian} ${unitLabel}`.trim();
+      }
+    }
+
+    const clinical = evaluateIndicatorClinicalSeverity({
+      indicator: targetIndicator,
+      category: definition.category,
+      latestValue: latestNumericValue,
+      diastolicValue: diastolicNumericValue,
+      baseline,
+      assessmentStatus: assessment?.assessment_status,
+      environment,
+    });
+
     const metric: HomeMetric = {
       ...definition,
       record: latest,
+      latestNumericValue,
+      diastolicNumericValue,
+      baselineMedianDisplay,
       baseline,
       assessment,
+      clinical,
       trendValues: nonNullMatching
         .slice(-12)
         .map((record) => metricTrendValue(definition.id, record))
@@ -279,6 +332,7 @@ function buildExplainableObservations(
   records: HealthRecord[],
   astronautId: string,
   reportedSymptoms: boolean,
+  environment: MissionEnvironment,
 ): IndicatorObservationDetail[] {
   const byIndicator = new Map<string, HealthRecord[]>();
   for (const rec of records) {
@@ -324,9 +378,25 @@ function buildExplainableObservations(
     });
 
     const pct = baseline.period_comparison.percentage_change;
+    const pctFormatted = formatPercentageShift(pct);
+    const absPctFormatted = pct !== null ? `${Math.abs(pct).toFixed(1)}%` : null;
     const dir = baseline.period_comparison.direction;
     const earlierMean = baseline.period_comparison.earlier_mean;
     const recentMean = baseline.period_comparison.recent_mean;
+    const displayUnit = formatClinicalUnit(latestRecord.unit, indicatorId);
+
+    const clinical = evaluateIndicatorClinicalSeverity({
+      indicator: indicatorId,
+      category,
+      latestValue: recordValue(latestRecord),
+      diastolicValue:
+        latestRecord.category === 'cardiovascular'
+          ? (latestRecord.blood_pressure?.diastolic ?? null)
+          : null,
+      baseline,
+      assessmentStatus: assessment.assessment_status,
+      environment,
+    });
 
     let observationKindLabel: IndicatorObservationDetail['observationKindLabel'] =
       'Statistical Observation';
@@ -344,36 +414,36 @@ function buildExplainableObservations(
       changeExplanation = `${formatIndicatorTitle(indicatorId)} currently has ${baseline.valid_count} valid recorded measurement(s). At least 3 valid measurements are required before TUMI-HEALT computes a personal baseline or percentage shift.`;
     } else if (assessment.assessment_status === 'REVIEW_REQUIRED') {
       observationKindLabel = 'Statistical Observation';
-      whyDisplayed = `Triggered by Rule R4 (Statistical Period Shift ≥20%): recent period mean shifted by ${pct !== null ? `${pct > 0 ? '+' : ''}${pct}%` : '≥20%'} compared with your earlier personal baseline.`;
-      if (earlierMean !== null && recentMean !== null && pct !== null) {
+      whyDisplayed = `Triggered by Rule R4 (Statistical Period Shift ≥20%): recent period mean shifted by ${pctFormatted ?? '≥20%'} compared with your earlier personal baseline.`;
+      if (earlierMean !== null && recentMean !== null && absPctFormatted !== null) {
         const directionWord = dir === 'decrease' ? 'decreased' : dir === 'increase' ? 'increased' : 'changed';
-        changeExplanation = `Your ${formatIndicatorTitle(indicatorId).toLowerCase()} has ${directionWord} by ${Math.abs(pct)}% in the recent period (recent mean ${recentMean} ${latestRecord.unit} vs. earlier baseline mean ${earlierMean} ${latestRecord.unit}). Review your 90-day history and consider reporting persistent changes to the medical team.`;
+        changeExplanation = `Your ${formatIndicatorTitle(indicatorId).toLowerCase()} has ${directionWord} by ${absPctFormatted} in the recent period (recent mean ${recentMean.toFixed(2)} ${displayUnit} vs. earlier baseline mean ${earlierMean.toFixed(2)} ${displayUnit}).`;
       }
     } else if (assessment.assessment_status === 'MONITOR') {
       if (baseline.freshness_days !== null && baseline.freshness_days > 14) {
         observationKindLabel = 'Outdated Measurement Warning';
-        whyDisplayed = `Triggered by Rule R3 (Data Freshness >14 Days): latest valid measurement was recorded ${baseline.freshness_days} days ago.`;
-        changeExplanation = `${formatIndicatorTitle(indicatorId)} has a valid personal baseline (${baseline.median} ${latestRecord.unit}), but the most recent measurement is ${baseline.freshness_days} days old. Collect or import an updated reading before relying on current trend status.`;
+        whyDisplayed = `Triggered by Rule R3 (Data Freshness >14 Days): latest valid measurement was recorded ${baseline.freshness_days.toFixed(1)} days ago.`;
+        changeExplanation = `${formatIndicatorTitle(indicatorId)} has a valid personal baseline (${baseline.median?.toFixed(2)} ${displayUnit}), but the most recent measurement is ${baseline.freshness_days.toFixed(1)} days old. Collect an updated reading before relying on current trend status.`;
       } else {
         observationKindLabel = 'Data-Quality Warning';
-        whyDisplayed = `Triggered by Rule R3 (Excluded / Missing Records): ${baseline.excluded_records.length} record(s) were excluded due to missing values or unit flags.`;
+        whyDisplayed = `Longitudinal baseline computed from ${baseline.valid_count} valid measurement(s) with null gaps preserved without zero-filling.`;
       }
     } else {
       observationKindLabel = 'Statistical Observation';
       whyDisplayed =
-        'Triggered by Rule R5 (Within Personal Baseline Variability): recent measurements remain within <20% of your earlier personal baseline.';
-      if (earlierMean !== null && recentMean !== null && pct !== null) {
-        changeExplanation = `${formatIndicatorTitle(indicatorId)} remains stable compared with your personal baseline (recent mean ${recentMean} ${latestRecord.unit} vs. earlier baseline mean ${earlierMean} ${latestRecord.unit}, ${pct > 0 ? '+' : ''}${pct}% change).`;
+        'Triggered by Rule R5 (Within Personal Baseline Variability): recent measurements remain within personal baseline continuity.';
+      if (earlierMean !== null && recentMean !== null && pctFormatted !== null) {
+        changeExplanation = `${formatIndicatorTitle(indicatorId)} shifted by ${pctFormatted} compared with your personal baseline (recent mean ${recentMean.toFixed(2)} ${displayUnit} vs. earlier baseline mean ${earlierMean.toFixed(2)} ${displayUnit}).`;
       }
     }
 
     const excludedNote =
       baseline.excluded_records.length > 0
-        ? ` (${baseline.excluded_records.length} missing/flagged record(s) excluded without zero-filling)`
+        ? ` (${baseline.excluded_records.length} null gap(s) preserved without zero-filling)`
         : '';
     const sufficiencySummary =
       baseline.status === 'computed'
-        ? `Sufficient history: ${baseline.valid_count} valid measurements of ${baseline.total_examined} examined${excludedNote} · Freshness: ${baseline.freshness_days ?? 0}d ago`
+        ? `Sufficient history: ${baseline.valid_count} valid measurements of ${baseline.total_examined} examined${excludedNote} · Freshness: ${baseline.freshness_days !== null ? baseline.freshness_days.toFixed(0) : 0}d ago`
         : `Insufficient history: ${baseline.valid_count} of 3 required valid measurements (${baseline.total_examined} examined)`;
 
     details.push({
@@ -385,6 +455,7 @@ function buildExplainableObservations(
       previousRecord,
       baseline,
       assessment,
+      clinical,
       observationKindLabel,
       whyDisplayed,
       changeExplanation,
@@ -469,6 +540,7 @@ function greeting(date = new Date()): string {
 
 export function DashboardPage() {
   const { active, isDemoMode, enterDemoMode } = useProfile();
+  const [environment, setEnvironment] = useState<MissionEnvironment>('iss-microgravity');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [showAllObservations, setShowAllObservations] = useState(false);
   const [observationFilter, setObservationFilter] = useState<'attention' | 'all'>('attention');
@@ -523,8 +595,29 @@ export function DashboardPage() {
     const hasSymptoms = Boolean(
       todayCheckIn && (todayCheckIn.mood === 'unwell' || todayCheckIn.symptoms.length > 0),
     );
-    const metrics = buildMetrics(records, id, hasSymptoms);
-    const allObservations = buildExplainableObservations(records, id, hasSymptoms);
+    const metrics = buildMetrics(records, id, hasSymptoms, environment);
+    const allObservations = buildExplainableObservations(records, id, hasSymptoms, environment);
+    const sleepMetric = metrics.find((m) => m.id === 'sleep');
+    const hrMetric = metrics.find((m) => m.id === 'heart-rate');
+    const bpMetric = metrics.find((m) => m.id === 'blood-pressure');
+    const bloodMetric = metrics.find((m) => m.id === 'blood');
+    const consensus = evaluateMultiSystemConsensus({
+      environment,
+      sleepHours: sleepMetric?.latestNumericValue ?? null,
+      sleepPctChange: sleepMetric?.baseline?.period_comparison.percentage_change ?? null,
+      sleepSeverity: sleepMetric?.clinical.severity ?? 'insufficient',
+      heartRateBpm: hrMetric?.latestNumericValue ?? null,
+      heartRatePctChange: hrMetric?.baseline?.period_comparison.percentage_change ?? null,
+      heartRateSeverity: hrMetric?.clinical.severity ?? 'insufficient',
+      systolicMmHg: bpMetric?.latestNumericValue ?? null,
+      diastolicMmHg: bpMetric?.diastolicNumericValue ?? null,
+      bpPctChange: bpMetric?.baseline?.period_comparison.percentage_change ?? null,
+      bpSeverity: bpMetric?.clinical.severity ?? 'insufficient',
+      hemoglobinGdL: bloodMetric?.latestNumericValue ?? null,
+      hemoglobinPctChange: bloodMetric?.baseline?.period_comparison.percentage_change ?? null,
+      hemoglobinSeverity: bloodMetric?.clinical.severity ?? 'insufficient',
+      reportedSymptoms: hasSymptoms,
+    });
 
     const activity: RecentActivity[] = [
       ...records.slice(-25).map((record) => ({
@@ -556,10 +649,11 @@ export function DashboardPage() {
       todayCheckIn,
       checkIns,
       metrics,
+      consensus,
       allObservations,
       activity: activity.slice(0, 6),
     };
-  }, [id, today]);
+  }, [id, today, environment]);
 
   const metrics = data?.metrics ?? [];
   const allObservations = data?.allObservations ?? [];
@@ -771,6 +865,15 @@ export function DashboardPage() {
         <Alert kind="info">{demoReadyMsg}</Alert>
       )}
 
+      {/* Unified Multi-System Clinical Consensus Panel (Top Priority) */}
+      {data && data.records.length > 0 && (
+        <MissionHealthConsensusCard
+          environment={environment}
+          onEnvironmentChange={setEnvironment}
+          consensus={data.consensus}
+        />
+      )}
+
       {/* Key Vital & Biomarker Summary Cards */}
       <section aria-labelledby="health-summary-title" className="space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -779,7 +882,7 @@ export function DashboardPage() {
               Health summary
             </h2>
             <p className="text-xs text-slate-400">
-              Latest recorded measurements across Sleep, Cardiovascular Vitals, and Blood Biomarkers compared with your personal baseline.
+              Latest recorded measurements across Sleep, Cardiovascular Vitals, and Blood Biomarkers compared with your personal baseline (± 1 SD).
             </p>
           </div>
           <Link to="/import" className="text-sm font-medium text-cyan-300 hover:underline">
@@ -788,10 +891,13 @@ export function DashboardPage() {
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {metrics.map((metric) => {
-            const pct = metric.baseline?.period_comparison.percentage_change;
-            const median = metric.baseline?.median;
+            const pctFormatted = formatPercentageShift(
+              metric.baseline?.period_comparison.percentage_change,
+            );
+            const cardStatus = clinicalSeverityToHealthStatus(metric.clinical.severity);
+            const borderClass = severityBorderClass(cardStatus);
             return (
-              <Card key={metric.id} className="min-w-0">
+              <Card key={metric.id} className={`min-w-0 border-2 ${borderClass}`}>
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="text-sm font-semibold text-slate-200">{metric.label}</h3>
                   {metric.record && <OriginBadge origin={metric.record.data_origin} />}
@@ -804,16 +910,18 @@ export function DashboardPage() {
                     <p className="mt-1 text-xs text-slate-300">
                       Latest: {formatDate(metric.record.timestamp)}
                     </p>
-                    {median !== null && median !== undefined && (
+                    {metric.baselineMedianDisplay && (
                       <p className="mt-0.5 text-xs text-slate-400">
-                        Personal baseline median: <strong className="text-slate-200">{median} {metric.baseline?.unit}</strong>
-                        {pct !== null && pct !== undefined ? ` (${pct > 0 ? '+' : ''}${pct}% recent shift)` : ''}
+                        Personal baseline median:{' '}
+                        <strong className="text-slate-200">{metric.baselineMedianDisplay}</strong>
+                        {pctFormatted ? ` (${pctFormatted} recent shift)` : ''}
                       </p>
                     )}
                     <TinyTrend label={`${metric.label} trend`} values={metric.trendValues} />
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                       <StatusBadge
-                        status={assessmentStatusToHealthStatus(metric.assessment?.assessment_status)}
+                        status={cardStatus}
+                        label={metric.clinical.badgeLabel}
                       />
                       <Link
                         to="/trends"
@@ -885,13 +993,18 @@ export function DashboardPage() {
                   const currVal = recordValue(obs.latestRecord);
                   const earlierMean = obs.baseline.period_comparison.earlier_mean;
                   const recentMean = obs.baseline.period_comparison.recent_mean;
-                  const pct = obs.baseline.period_comparison.percentage_change;
+                  const pctFormatted = formatPercentageShift(
+                    obs.baseline.period_comparison.percentage_change,
+                  );
+                  const obsUnit = formatClinicalUnit(obs.latestRecord.unit, obs.indicatorId);
+                  const obsHealthStatus = clinicalSeverityToHealthStatus(obs.clinical.severity);
+                  const obsBorderClass = severityBorderClass(obsHealthStatus);
 
                   return (
                     <li
                       key={`${obs.category}:${obs.indicatorId}`}
                       data-testid="observation-detail-card"
-                      className="rounded-xl border border-slate-800 bg-slate-950/65 p-4 sm:p-5"
+                      className={`rounded-xl border-2 ${obsBorderClass} bg-slate-950/65 p-4 sm:p-5`}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
@@ -916,7 +1029,8 @@ export function DashboardPage() {
 
                         <div className="flex flex-wrap items-center gap-2">
                           <StatusBadge
-                            status={assessmentStatusToHealthStatus(obs.assessment.assessment_status)}
+                            status={obsHealthStatus}
+                            label={obs.clinical.badgeLabel}
                           />
                           <OriginBadge origin={obs.latestRecord.data_origin} />
                         </div>
@@ -927,44 +1041,44 @@ export function DashboardPage() {
                         <div>
                           <span className="text-slate-400">Current Value &amp; Unit:</span>
                           <p className="mt-0.5 font-mono text-sm font-bold text-cyan-300">
-                            {currVal !== null ? `${currVal} ${obs.latestRecord.unit}` : `Missing (NA) ${obs.latestRecord.unit}`}
+                            {currVal !== null ? `${currVal} ${obsUnit}` : `Missing (NA) ${obsUnit}`}
                           </p>
                         </div>
                         <div>
                           <span className="text-slate-400">Previous Recorded Value:</span>
                           <p className="mt-0.5 font-mono text-sm font-semibold text-slate-200">
                             {prevVal !== null && obs.previousRecord
-                              ? `${prevVal} ${obs.previousRecord.unit} (${formatDate(obs.previousRecord.timestamp)})`
+                              ? `${prevVal} ${formatClinicalUnit(obs.previousRecord.unit, obs.indicatorId)} (${formatDate(obs.previousRecord.timestamp)})`
                               : 'No prior sample'}
                           </p>
                         </div>
                         <div>
                           <span className="text-slate-400">Personal Baseline Comparison:</span>
                           <p className="mt-0.5 font-mono text-sm font-semibold text-slate-200">
-                            {earlierMean !== null && recentMean !== null && pct !== null
-                              ? `${earlierMean} → ${recentMean} ${obs.latestRecord.unit} (${pct > 0 ? '+' : ''}${pct}%)`
+                            {earlierMean !== null && recentMean !== null && pctFormatted !== null
+                              ? `${earlierMean.toFixed(2)} → ${recentMean.toFixed(2)} ${obsUnit} (${pctFormatted})`
                               : obs.baseline.median !== null
-                                ? `Median: ${obs.baseline.median} ${obs.latestRecord.unit}`
+                                ? `Median: ${obs.baseline.median.toFixed(2)} ${obsUnit}`
                                 : 'Requires ≥3 valid samples'}
                           </p>
                         </div>
                       </div>
 
-                      {/* Plain-language explanation, why displayed, data sufficiency, and next step */}
+                      {/* Spaceflight Context & Actionable Countermeasures */}
                       <div className="mt-3 space-y-2 text-sm">
                         <p className="leading-relaxed text-slate-200">
-                          <strong className="text-white">Observed change:</strong> {obs.changeExplanation}
+                          <strong className="text-white">Clinical trend:</strong> {obs.changeExplanation}
                         </p>
                         <p className="text-xs leading-relaxed text-slate-300">
-                          <strong className="text-cyan-300">Why this observation is shown:</strong> {obs.whyDisplayed}
+                          <strong className="text-cyan-300">Spaceflight Context:</strong> {obs.clinical.spaceflightContext}
                         </p>
-                        <p className="text-xs leading-relaxed text-slate-300">
-                          <strong className="text-slate-200">Data quality &amp; sufficiency:</strong> {obs.sufficiencySummary}
+                        <p className="text-xs leading-relaxed text-slate-400">
+                          <strong className="text-slate-300">Data sufficiency:</strong> {obs.sufficiencySummary}
                         </p>
                         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-cyan-900/50 bg-cyan-950/25 px-3 py-2 text-xs">
                           <p className="text-cyan-100">
-                            <strong className="text-cyan-300">Suggested next step:</strong>{' '}
-                            {obs.assessment.recommended_next_action}
+                            <strong className="text-cyan-300">Actionable Countermeasure:</strong>{' '}
+                            {obs.clinical.countermeasure}
                           </p>
                           <div className="flex items-center gap-3">
                             <Link

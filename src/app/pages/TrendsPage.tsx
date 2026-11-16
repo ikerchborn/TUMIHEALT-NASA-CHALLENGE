@@ -3,17 +3,32 @@ import type { DateRangeFilter, HealthCategory, HealthRecord, MissionContext } fr
 import {
   buildTrendPoints,
   calculatePersonalBaselineFromRecords,
+  evaluateIndicatorClinicalSeverity,
+  evaluateMultiSystemConsensus,
   evaluateSelfAssessmentFromRecords,
   filterRecordsByDateRange,
+  formatClinicalUnit,
+  formatPercentageShift,
   getIndicatorMetadata,
   getMissionContexts,
   listDailyCheckIns,
   queryRecords,
+  type MissionEnvironment,
 } from '@/services';
 import { TrendChart } from '../components/TrendChart';
+import { MissionHealthConsensusCard } from '../components/MissionHealthConsensusCard';
 import { useProfile } from '../context/ProfileContext';
-import { Alert, Card, EmptyState, OriginBadge, PageHeader, StatusBadge, inputClass } from '../components/ui';
-import type { HealthStatus } from '../components/ui';
+import {
+  Alert,
+  Card,
+  EmptyState,
+  OriginBadge,
+  PageHeader,
+  StatusBadge,
+  clinicalSeverityToHealthStatus,
+  inputClass,
+  severityBorderClass,
+} from '../components/ui';
 
 const ranges = [
   { label: '7D', days: 7 },
@@ -149,6 +164,7 @@ export function TrendsPage() {
   const [checkIns, setCheckIns] = useState<Awaited<ReturnType<typeof listDailyCheckIns>>>([]);
   const [missionContexts, setMissionContexts] = useState<MissionContext[]>([]);
   const [rangeDays, setRangeDays] = useState<number | null>(90);
+  const [environment, setEnvironment] = useState<MissionEnvironment>('iss-microgravity');
   const [activeView, setActiveView] = useState<'trends' | 'timeline'>('trends');
   const [selectedIndicators, setSelectedIndicators] = useState<Record<string, string>>(
     Object.fromEntries(metrics.map((metric) => [metric.id, metric.preferred])),
@@ -302,26 +318,59 @@ export function TrendsPage() {
     )).sort();
     if (!indicators.includes(indicator)) indicators.unshift(indicator);
     const unit = latest?.unit ?? baseline.unit ?? meta?.measurement_unit ?? null;
+    const displayUnit = formatClinicalUnit(unit, indicator);
+    const diastolicValue =
+      metric.id === 'blood-pressure' && latest?.category === 'cardiovascular'
+        ? (latest.blood_pressure?.diastolic ?? null)
+        : null;
+    const diastolicBaseline =
+      metric.id === 'blood-pressure'
+        ? calculatePersonalBaselineFromRecords(records, {
+            astronaut_id: active.astronaut_id,
+            category: 'cardiovascular',
+            indicator: 'diastolic_blood_pressure',
+            minSamples: 3,
+          })
+        : null;
+    const latestDisplay = latest
+      ? metric.id === 'blood-pressure' &&
+        (indicator === 'systolic_blood_pressure' || indicator === 'blood_pressure') &&
+        diastolicValue !== null
+        ? `${latest.value}/${diastolicValue} mmHg`
+        : `${latest.value} ${displayUnit}`
+      : 'No data';
+    const medianDisplay =
+      baseline.status === 'computed' && baseline.median !== null
+        ? metric.id === 'blood-pressure' &&
+          (indicator === 'systolic_blood_pressure' || indicator === 'blood_pressure') &&
+          diastolicBaseline?.median !== null &&
+          diastolicBaseline?.median !== undefined
+          ? `${Math.round(baseline.median)}/${Math.round(diastolicBaseline.median)} mmHg`
+          : `${baseline.median.toFixed(2)} ${displayUnit}`
+        : null;
+
+    const pctFormatted = formatPercentageShift(baseline.period_comparison.percentage_change);
     const baselineChange =
       baseline.status === 'computed' && latest && baseline.median !== null
         ? latest.value - baseline.median
         : null;
     const changeDescription = baselineChange === null
       ? 'Not enough data for a personal baseline.'
-      : `${baselineChange > 0 ? '+' : ''}${baselineChange.toFixed(2)} ${unit ?? ''} vs personal median.`;
+      : `${baselineChange > 0 ? '+' : ''}${baselineChange.toFixed(2)} ${displayUnit} vs personal median${pctFormatted ? ` (${pctFormatted} period shift)` : ''}.`;
     const summary = latest && average !== null
-      ? `Latest: ${latest.value} ${latest.unit} on ${new Date(latest.timestamp).toLocaleDateString('en-US')}. Average in this range: ${average.toFixed(2)} ${unit ?? ''}. ${changeDescription}`
+      ? `Latest: ${latestDisplay} on ${new Date(latest.timestamp).toLocaleDateString('en-US')}. Average in this range: ${average.toFixed(2)} ${displayUnit}. ${changeDescription}`
       : 'No numeric measurements in this range. Import personal records for this indicator to see a trend.';
 
-    const healthStatus: HealthStatus =
-      assessment.assessment_status === 'INFORMATIONAL'
-        ? 'within-usual-range'
-        : assessment.assessment_status === 'REVIEW_REQUIRED'
-          ? 'different-from-usual'
-          : assessment.assessment_status === 'MONITOR' ||
-              assessment.assessment_status === 'MEDICAL_ESCALATION'
-            ? 'review-recommended'
-            : 'not-enough-data';
+    const clinical = evaluateIndicatorClinicalSeverity({
+      indicator,
+      category: metric.category,
+      latestValue: latest?.value ?? null,
+      diastolicValue,
+      baseline,
+      assessmentStatus: assessment.assessment_status,
+      environment,
+    });
+    const healthStatus = clinicalSeverityToHealthStatus(clinical.severity);
 
     return {
       metric,
@@ -330,15 +379,46 @@ export function TrendsPage() {
       matchingRecords,
       excludedUnitCount: allMatchingRecords.length - matchingRecords.length,
       latest,
+      latestDisplay,
+      medianDisplay,
+      diastolicValue,
       average,
       unit,
+      displayUnit,
       baseline,
       assessment,
+      clinical,
       healthStatus,
+      pctFormatted,
       baselineChange,
       indicators,
       summary,
     };
+  });
+
+  const sleepPanel = panels.find((p) => p.metric.id === 'sleep');
+  const hrPanel = panels.find((p) => p.metric.id === 'heart-rate');
+  const bpPanel = panels.find((p) => p.metric.id === 'blood-pressure');
+  const bloodPanel = panels.find((p) => p.metric.id === 'blood');
+  const hasVisibleSymptoms = visibleCheckIns.some(
+    (c) => c.mood === 'unwell' || c.symptoms.length > 0,
+  );
+  const consensus = evaluateMultiSystemConsensus({
+    environment,
+    sleepHours: sleepPanel?.latest?.value ?? null,
+    sleepPctChange: sleepPanel?.baseline.period_comparison.percentage_change ?? null,
+    sleepSeverity: sleepPanel?.clinical.severity ?? 'insufficient',
+    heartRateBpm: hrPanel?.latest?.value ?? null,
+    heartRatePctChange: hrPanel?.baseline.period_comparison.percentage_change ?? null,
+    heartRateSeverity: hrPanel?.clinical.severity ?? 'insufficient',
+    systolicMmHg: bpPanel?.latest?.value ?? null,
+    diastolicMmHg: bpPanel?.diastolicValue ?? null,
+    bpPctChange: bpPanel?.baseline.period_comparison.percentage_change ?? null,
+    bpSeverity: bpPanel?.clinical.severity ?? 'insufficient',
+    hemoglobinGdL: bloodPanel?.latest?.value ?? null,
+    hemoglobinPctChange: bloodPanel?.baseline.period_comparison.percentage_change ?? null,
+    hemoglobinSeverity: bloodPanel?.clinical.severity ?? 'insufficient',
+    reportedSymptoms: hasVisibleSymptoms,
   });
 
   return (
@@ -404,34 +484,41 @@ export function TrendsPage() {
           <>
             {activeView === 'trends' ? (
               <>
+                <MissionHealthConsensusCard
+                  environment={environment}
+                  onEnvironmentChange={setEnvironment}
+                  consensus={consensus}
+                />
+
                 <section aria-label="Trend summaries" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   {panels.map((panel) => (
                     <Card
                       key={panel.metric.id}
                       title={panel.metric.title}
                       subtitle={panel.meta?.name ?? panel.indicator}
-                      className="p-4"
+                      className={`border-2 p-4 ${severityBorderClass(panel.healthStatus)}`}
                     >
                       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
                         <dt className="text-slate-400">Latest</dt>
                         <dd className="text-right font-mono font-semibold text-slate-200">
-                          {panel.latest ? `${panel.latest.value} ${panel.latest.unit}` : 'No data'}
+                          {panel.latestDisplay}
                         </dd>
-                        <dt className="text-slate-400">Average in range</dt>
+                        <dt className="text-slate-400">Baseline median</dt>
                         <dd className="text-right font-mono text-slate-200">
-                          {panel.average === null ? '—' : `${panel.average.toFixed(2)} ${panel.unit ?? ''}`}
+                          {panel.medianDisplay ?? '—'}
                         </dd>
-                        <dt className="text-slate-400">Vs personal median</dt>
+                        <dt className="text-slate-400">Period shift</dt>
                         <dd className="text-right font-mono text-slate-200">
-                          {panel.baselineChange === null
-                            ? 'Not enough data'
-                            : `${panel.baselineChange > 0 ? '+' : ''}${panel.baselineChange.toFixed(2)} ${panel.unit ?? ''}`}
+                          {panel.pctFormatted ?? 'Not enough data'}
                         </dd>
                         <dt className="text-slate-400">Records in range</dt>
                         <dd className="text-right font-mono text-slate-200">{panel.matchingRecords.length}</dd>
                       </dl>
                       <div className="mt-3">
-                        <StatusBadge status={panel.healthStatus} />
+                        <StatusBadge
+                          status={panel.healthStatus}
+                          label={panel.clinical.badgeLabel}
+                        />
                       </div>
                     </Card>
                   ))}
@@ -443,6 +530,7 @@ export function TrendsPage() {
                       key={panel.metric.id}
                       title={panel.metric.title}
                       subtitle={panel.meta ? `${panel.meta.name} (${panel.indicator})` : panel.indicator}
+                      className={`border-2 ${severityBorderClass(panel.healthStatus)}`}
                       action={(
                         <select
                           aria-label={`${panel.metric.title} indicator`}
@@ -483,29 +571,26 @@ export function TrendsPage() {
                         {panel.baseline.status === 'computed'
                           ? 'The shaded band shows your personal mean ± 1 SD across available records; it is descriptive and not a clinical reference range.'
                           : 'A personal baseline is shown only after at least three valid, unit-consistent measurements.'}
-                        {panel.excludedUnitCount > 0
-                          ? ` ${panel.excludedUnitCount} record(s) with a different unit were excluded from this chart.`
-                          : ''}
                       </p>
 
-                      {/* Progressive-disclosure Indicator Details & Baseline Explanation */}
+                      {/* NASA Spaceflight Context & Actionable Countermeasures */}
                       <div className="mt-3 rounded-xl border border-slate-800/90 bg-slate-950/60 p-3.5 text-xs">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="font-semibold text-white">
-                            {panel.meta?.name ?? panel.indicator} · Observation &amp; Meaning
+                            {panel.meta?.name ?? panel.indicator} · Aerospace Medicine Protocol
                           </span>
-                          <StatusBadge status={panel.healthStatus} />
+                          <StatusBadge
+                            status={panel.healthStatus}
+                            label={panel.clinical.badgeLabel}
+                          />
                         </div>
-                        {panel.meta && (
-                          <p className="mt-1.5 text-slate-300">
-                            <strong>What it means:</strong> {panel.meta.definition} ({panel.meta.scientific_relevance})
-                          </p>
-                        )}
-                        <p className="mt-1.5 text-slate-300">
-                          <strong>Baseline comparison:</strong> {panel.assessment.explanation}
+                        <p className="mt-2 text-slate-300">
+                          <strong className="text-cyan-300">Spaceflight Context:</strong>{' '}
+                          {panel.clinical.spaceflightContext}
                         </p>
-                        <p className="mt-1 text-cyan-200">
-                          <strong>Next step:</strong> {panel.assessment.recommended_next_action}
+                        <p className="mt-1.5 text-cyan-100">
+                          <strong className="text-cyan-300">Actionable Countermeasure:</strong>{' '}
+                          {panel.clinical.countermeasure}
                         </p>
                       </div>
                     </Card>

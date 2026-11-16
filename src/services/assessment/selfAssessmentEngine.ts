@@ -7,6 +7,7 @@ import type {
 } from '@/types';
 import { calculatePersonalBaselineFromRecords } from '@/services/baseline';
 import { queryRecords } from '@/services/storage';
+import { getSpaceflightProtocol } from './spaceflightClinicalProtocol';
 
 export const ASSESSMENT_RULE_VERSION = '1.0.0';
 
@@ -24,11 +25,11 @@ export const GUIDANCE_CATALOG: readonly GuidanceItem[] = [
   },
   {
     guidance_id: 'guide-sleep-hygiene',
-    title: 'Track Sleep Latency and Efficiency Consistently',
+    title: 'NASA Circadian Light & Sleep Countermeasure Protocol',
     category: 'sleep',
     guidance_type: 'measurement_instruction',
     content:
-      'Record sleep duration, latency, and efficiency consistently using the same unit (hours and %) to avoid unit-mismatch exclusions in longitudinal baselines.',
+      'Execute NASA Circadian Light Protocol (blue-enriched light upon waking, blue-depleted light 2 hrs pre-sleep), restrict caffeine 6 hrs prior to sleep block, and schedule a 20-min recovery nap before EVA/critical tasks.',
     scientific_reference:
       'https://nlsp.nasa.gov/search/data/details/e26501eb-7d7a-5012-8c8e-c5bdb3eecaf6?dataType=DATASETS',
     version: '1.0.0',
@@ -97,19 +98,20 @@ export function evaluateSelfAssessmentFromRecords(
   let explanation = '';
   let nextAction = '';
 
+  const protocol = getSpaceflightProtocol(options.indicator, options.category);
+
   if (options.user_reported_symptoms || options.manual_escalation_requested) {
     status = 'MEDICAL_ESCALATION';
     rulesApplied.push('PROTOCOL_EXPLICIT_SYMPTOM_OR_ESCALATION_FLAG');
     explanation =
       'Medical escalation was triggered by an explicit crew symptom report or manual escalation request.';
     nextAction =
-      'Contact the flight surgeon or mission medical team per mission medical protocol. Do not rely on software alone for clinical decisions.';
+      `Contact Houston / Flight Surgeon per mission medical protocol. ${protocol.countermeasure}`;
   } else if (baseline.status === 'insufficient_data') {
     status = 'INSUFFICIENT_DATA';
     rulesApplied.push('RULE_MIN_BASELINE_SAMPLES_REQUIRED');
     explanation = `Only ${baseline.valid_count} valid measurement(s) are available for ${options.indicator}; at least 3 are required for a personal baseline.`;
-    nextAction =
-      'Record additional valid measurements with consistent units before evaluating personal trends.';
+    nextAction = protocol.countermeasure;
   } else if (
     baseline.freshness_days !== null &&
     baseline.freshness_days > staleDays
@@ -117,8 +119,7 @@ export function evaluateSelfAssessmentFromRecords(
     status = 'MONITOR';
     rulesApplied.push('RULE_STALE_MEASUREMENT_FRESHNESS_CHECK');
     explanation = `Personal baseline is available (${baseline.valid_count} records), but the most recent measurement is ${baseline.freshness_days.toFixed(1)} days old.`;
-    nextAction =
-      'Repeat the measurement under documented mission context to refresh your current status.';
+    nextAction = `Collect a resting follow-up measurement. ${protocol.countermeasure}`;
   } else if (
     baseline.period_comparison.percentage_change !== null &&
     Math.abs(baseline.period_comparison.percentage_change) >= 20 &&
@@ -126,20 +127,18 @@ export function evaluateSelfAssessmentFromRecords(
   ) {
     status = 'REVIEW_REQUIRED';
     rulesApplied.push('RULE_STATISTICAL_PERSONAL_BASELINE_SHIFT_20PCT');
-    explanation = `Recent ${options.indicator} measurements shifted by ${baseline.period_comparison.percentage_change.toFixed(1)}% relative to your earlier personal baseline mean. This is a statistical observation, not a medical diagnosis.`;
-    nextAction =
-      'Repeat the measurement under resting context, verify measurement units/device, and review with mission medical support if persistent.';
+    explanation = `Recent ${options.indicator} measurements shifted by ${baseline.period_comparison.percentage_change.toFixed(1)}% relative to your earlier personal baseline mean. ${protocol.spaceflightContext}`;
+    nextAction = protocol.countermeasure;
   } else if (baseline.excluded_records.length > 0) {
     status = 'MONITOR';
     rulesApplied.push('RULE_DATA_QUALITY_EXCLUSIONS_PRESENT');
-    explanation = `Personal baseline was computed from ${baseline.valid_count} valid record(s), with ${baseline.excluded_records.length} record(s) excluded due to missing values or unit mismatches.`;
-    nextAction =
-      'Review excluded entries for missing values or incompatible units and continue routine monitoring.';
+    explanation = `Personal baseline computed from ${baseline.valid_count} valid record(s) (${baseline.excluded_records.length} missing/null gap(s) preserved without zero-filling). ${protocol.spaceflightContext}`;
+    nextAction = protocol.countermeasure;
   } else {
     status = 'INFORMATIONAL';
     rulesApplied.push('RULE_PERSONAL_BASELINE_WITHIN_STATISTICAL_CONTINUITY');
-    explanation = `${baseline.valid_count} valid ${options.indicator} measurements are consistent with your personal historical baseline (mean: ${baseline.mean?.toFixed(2)} ${baseline.unit}).`;
-    nextAction = 'Continue routine self-monitoring as scheduled.';
+    explanation = `${baseline.valid_count} valid ${options.indicator} measurements remain within personal baseline continuity (mean: ${baseline.mean?.toFixed(2)} ${baseline.unit}). ${protocol.spaceflightContext}`;
+    nextAction = protocol.countermeasure;
   }
 
   return {
