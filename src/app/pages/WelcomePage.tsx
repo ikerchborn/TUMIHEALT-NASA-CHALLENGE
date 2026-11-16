@@ -20,6 +20,7 @@ const ROLE_OPTIONS = [
 export interface TeamMemberCardConfig {
   id: string;
   badgeCode: string;
+  photo: string;
   namePlaceholder: string;
   rolePlaceholder: string;
   contributionPlaceholder: string;
@@ -27,65 +28,68 @@ export interface TeamMemberCardConfig {
 }
 
 /**
- * Editable placeholder roster for "The Team Behind TUMI-HEALT".
- * Replace `namePlaceholder`, `rolePlaceholder`, and `contributionPlaceholder`
- * with verified team details when ready. No real identities or clinical
- * qualifications are fabricated.
+ * Verified roster for "The Team Behind TUMI-HEALT".
  */
 export const TEAM_MEMBERS: readonly TeamMemberCardConfig[] = [
   {
     id: 'team-member-1',
     badgeCode: 'TM-01',
-    namePlaceholder: 'Team Member 01 (Editable Name)',
-    rolePlaceholder: 'Mission Systems & Software Architecture',
+    photo: '/team/luis-chanduvi.jpg',
+    namePlaceholder: 'Luis Chanduvi',
+    rolePlaceholder: 'Systems Engineering Coordinator',
     contributionPlaceholder:
-      'Designed the local-first browser architecture, IndexedDB isolation model, and deterministic data provenance pipeline.',
-    focusTag: 'Architecture & Local-First DB',
+      'Coordinated systems engineering, local-first browser architecture, IndexedDB isolation, and overall mission software delivery.',
+    focusTag: 'Systems & Coordination',
   },
   {
     id: 'team-member-2',
     badgeCode: 'TM-02',
-    namePlaceholder: 'Team Member 02 (Editable Name)',
-    rolePlaceholder: 'Aerospace UX/UI & Human Factors Design',
+    photo: '/team/jared-poma.jpg',
+    namePlaceholder: 'Jared Erick Poma Solís',
+    rolePlaceholder: 'Logistics Specialist',
     contributionPlaceholder:
-      'Crafted the progressive-disclosure crew interface, high-contrast orbital telemetry layout, and accessible 2D anatomical explorer.',
-    focusTag: 'Crew UX & Accessibility',
+      'Managed mission logistics, operational workflow planning, crew resource tracking, and end-to-end project coordination.',
+    focusTag: 'Mission Logistics',
   },
   {
     id: 'team-member-3',
     badgeCode: 'TM-03',
-    namePlaceholder: 'Team Member 03 (Editable Name)',
-    rolePlaceholder: 'Biomedical Data & NASA OSDR Integration',
+    photo: '/team/ximena-sampen.jpg',
+    namePlaceholder: 'Ximena Sampen Reinoso',
+    rolePlaceholder: 'Marketing & Design Specialist',
     contributionPlaceholder:
-      'Structured the indicator catalog, unit registry, and 90-day synthetic dataset around NASA OSDR OSD-569, OSD-575, UTMB, and Apollo AP005.',
-    focusTag: 'Biomedical Data Science',
+      'Led visual communication, brand identity, mission presentation design, and clear crew-facing messaging.',
+    focusTag: 'Marketing & Design',
   },
   {
     id: 'team-member-4',
     badgeCode: 'TM-04',
-    namePlaceholder: 'Team Member 04 (Editable Name)',
-    rolePlaceholder: 'Statistical Baseline & Self-Assessment Engine',
+    photo: '/team/jhony-valdiviezo.jpg',
+    namePlaceholder: 'Jhony Valdiviezo',
+    rolePlaceholder: 'Electrical & Mechanical Specialist',
     contributionPlaceholder:
-      'Implemented personal baseline computation, period-over-period shift detection, and non-diagnostic observation explanations.',
-    focusTag: 'Baseline & Guidance Engine',
+      'Contributed hardware-telemetry perspective, sensor integration alignment, and spacecraft instrumentation reliability.',
+    focusTag: 'Electrical & Mechanical',
   },
   {
     id: 'team-member-5',
     badgeCode: 'TM-05',
-    namePlaceholder: 'Team Member 05 (Editable Name)',
-    rolePlaceholder: 'Data Ingestion, Validation & Security',
+    photo: '/team/astrid-sanchez.jpg',
+    namePlaceholder: 'Astrid Sanchez Gonzales',
+    rolePlaceholder: 'Systems Engineer · UX/UI Lead',
     contributionPlaceholder:
-      'Built the multi-format CSV/XML/XLSX import pipeline, strict unit compatibility checks, and SHA-256 backup verification.',
-    focusTag: 'Ingestion & Security',
+      'Designed the progressive-disclosure crew interface, high-contrast orbital telemetry layout, and accessible 2D anatomical explorer.',
+    focusTag: 'Systems & UX/UI',
   },
   {
     id: 'team-member-6',
     badgeCode: 'TM-06',
-    namePlaceholder: 'Team Member 06 (Editable Name)',
-    rolePlaceholder: 'Quality Assurance & Mission Verification',
+    photo: '/team/dariana.jpg',
+    namePlaceholder: 'Dariana',
+    rolePlaceholder: 'Data Analyst',
     contributionPlaceholder:
-      'Developed automated unit, integration, and end-to-end accessibility verification suites for offline spacecraft operation.',
-    focusTag: 'Verification & QA',
+      'Structured the biomedical indicator catalog, NASA OSDR/NLSP dataset analysis, and 90-day synthetic health timeline.',
+    focusTag: 'Biomedical Data Analysis',
   },
 ];
 
@@ -428,13 +432,11 @@ export function WelcomePage() {
                   >
                     <div className="space-y-4">
                       <div className="flex items-center gap-3.5">
-                        {/* Avatar / Photo Placeholder */}
-                        <div
-                          aria-hidden="true"
-                          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-cyan-500/35 bg-slate-950 font-mono text-sm font-bold text-cyan-300 shadow-inner"
-                        >
-                          {member.badgeCode}
-                        </div>
+                        <img
+                          src={member.photo}
+                          alt={member.namePlaceholder}
+                          className="h-14 w-14 shrink-0 rounded-2xl border border-cyan-500/35 object-cover object-top shadow-inner"
+                        />
                         <div className="min-w-0">
                           <span className="inline-block rounded-md border border-slate-700 bg-slate-950/90 px-2 py-0.5 font-mono text-[11px] font-medium text-cyan-300">
                             {member.focusTag}

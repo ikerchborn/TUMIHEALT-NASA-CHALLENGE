@@ -19,6 +19,7 @@ import {
   type ExtractedSheetCsv,
   type ImportTemplateFormat,
 } from '@/services';
+import { buildSyntheticScenarioXlsx } from '@/services/demo';
 import type {
   CsvColumnMapping,
   CsvImportPreview,
@@ -229,6 +230,7 @@ export function ImportPage() {
   const [importedBatch, setImportedBatch] = useState<ImportBatch | null>(null);
   const [importedRecords, setImportedRecords] = useState<HealthRecord[]>([]);
   const [historyRecords, setHistoryRecords] = useState<HealthRecord[]>([]);
+  const [bulkImporting, setBulkImporting] = useState(false);
 
   useEffect(() => {
     setBatches([]);
@@ -293,6 +295,95 @@ export function ImportPage() {
       downloadFile(chosen.name, chosen.content, 'text/csv;charset=utf-8');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function downloadSyntheticScenarioXlsx() {
+    try {
+      const workbook = buildSyntheticScenarioXlsx();
+      downloadFile(workbook.fileName, workbook.content, workbook.mimeType);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function getImportableSheets() {
+    return sheets.filter((s) => {
+      try {
+        const info = inspectCsvFile(s.csvText, `${s.sheetName}.csv`);
+        const set = new Set(info.headers.map((h) => h.trim()));
+        return set.has('timestamp') && set.has('indicator') && set.has('value') && set.has('unit');
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  async function onImportAllSheets() {
+    if (!active) return;
+    if (isDemoMode) {
+      setError('Personal data import is unavailable in Demo Mode. Exit Demo Mode before importing your records.');
+      return;
+    }
+    const targetSheets = getImportableSheets();
+    if (targetSheets.length === 0) return;
+
+    setBulkImporting(true);
+    setError(null);
+    setResult(null);
+    try {
+      let totalImported = 0;
+      const importedSheetNames: string[] = [];
+
+      for (const s of targetSheets) {
+        const sheetFileName = `${s.sheetName}.csv`;
+        const info = inspectCsvFile(s.csvText, sheetFileName);
+        const guessed = guessMapping(info.headers);
+        const detectedCat = detectCategoryFromRows(info.sample_rows, guessed.indicator) ?? category;
+        const sampleOrigin = info.sample_rows[0]?.data_origin?.trim().toUpperCase();
+        const resolvedOrigin: DataOrigin =
+          sampleOrigin === 'SYNTHETIC' || sampleOrigin === 'SPACEFLIGHT' || sampleOrigin === 'GROUND_ANALOG'
+            ? sampleOrigin
+            : origin;
+
+        const sheetPreview = await prepareCsvImportPreview({
+          profileId: active.astronaut_id,
+          actorId: active.astronaut_id,
+          category: detectedCat,
+          fileName: sheetFileName,
+          sourceFileName: `${originalFileName}#${s.sheetName}`,
+          fileFormat,
+          csvText: s.csvText,
+          dataOrigin: resolvedOrigin,
+          sourceDataset:
+            info.sample_rows[0]?.source_dataset?.trim() ||
+            sourceDataset.trim() ||
+            originalFileName.replace(/\.(csv|xml|xlsx|xls)$/i, ''),
+          mapping: {
+            timestamp: guessed.timestamp ?? 'timestamp',
+            indicator: guessed.indicator ?? 'indicator',
+            value: guessed.value ?? 'value',
+            unit: guessed.unit ?? 'unit',
+            ...guessed,
+          },
+        });
+
+        const res = await confirmCsvImport(sheetPreview);
+        totalImported += res.imported_count;
+        importedSheetNames.push(s.sheetName);
+        setImportedBatch(res.batch);
+      }
+
+      setResult(
+        `Imported ${totalImported} records across ${importedSheetNames.length} sheets (${importedSheetNames.join(', ')}).`,
+      );
+      setPreview(null);
+      setInspection(null);
+      setSheets([]);
+    } catch (err) {
+      setError(formatFileImportError(originalFileName, err));
+    } finally {
+      setBulkImporting(false);
     }
   }
 
@@ -590,6 +681,13 @@ export function ImportPage() {
               Download complete 90-day synthetic timelines grounded in NASA OSDR OSD-569 (CBC), OSD-575 (CMP), UTMB Campaign 1 (Sleep), and Apollo AP005 (Cardiovascular) to test multi-indicator import:
             </p>
             <div className="mt-2.5 flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                onClick={downloadSyntheticScenarioXlsx}
+                className="border-purple-400/50 bg-purple-700 text-white hover:bg-purple-600"
+              >
+                Download Complete 90-Day Scenario (.xlsx)
+              </Button>
               <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('blood')}>
                 Download 90d Blood CSV (140 rows · 24 CBC/CMP biomarkers)
               </Button>
@@ -635,20 +733,34 @@ export function ImportPage() {
             </div>
           )}
           {sheets.length > 1 && (
-            <div className="mt-4 max-w-sm">
-              <Field label="Excel Sheet">
-                <select
-                  className={inputClass}
-                  value={selectedSheetIdx}
-                  onChange={(e) => onSheetChange(Number(e.target.value))}
+            <div className="mt-4 flex flex-wrap items-end gap-4">
+              <div className="min-w-[240px]">
+                <Field label="Excel Sheet">
+                  <select
+                    className={inputClass}
+                    value={selectedSheetIdx}
+                    onChange={(e) => onSheetChange(Number(e.target.value))}
+                  >
+                    {sheets.map((s, idx) => (
+                      <option key={s.sheetName} value={idx}>
+                        {s.sheetName}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              {getImportableSheets().length > 1 && (
+                <Button
+                  type="button"
+                  disabled={bulkImporting || isDemoMode}
+                  onClick={() => void onImportAllSheets()}
+                  className="border border-purple-400/50 bg-purple-700 text-white hover:bg-purple-600"
                 >
-                  {sheets.map((s, idx) => (
-                    <option key={s.sheetName} value={idx}>
-                      {s.sheetName}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+                  {bulkImporting
+                    ? 'Importing all sheets…'
+                    : `Import All Measurement Sheets (${getImportableSheets().length} sheets)`}
+                </Button>
+              )}
             </div>
           )}
         </Card>

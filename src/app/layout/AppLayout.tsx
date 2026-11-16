@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useProfile } from '../context/ProfileContext';
-import { Alert, DemoBanner, DisclaimerBanner, Icon, type IconName } from '../components/ui';
+import { Alert, DemoBanner, Icon, type IconName } from '../components/ui';
 
 interface NavItem {
   to: string;
@@ -125,7 +125,6 @@ export function AppLayout() {
 
   return (
     <div className="flex min-h-screen flex-col bg-mission-canvas text-slate-100">
-      <DisclaimerBanner />
       {databaseNotice && (
         <div className="px-page pt-3 sm:px-6 lg:px-8">
           <Alert kind="warn">{databaseNotice}</Alert>

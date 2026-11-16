@@ -19,6 +19,7 @@ import type {
 } from '@/types';
 import { useProfile } from '../context/ProfileContext';
 import { useAsync } from '../hooks/useAsync';
+import { buildSyntheticScenarioXlsx } from '@/services/demo';
 import { Alert, Button, Card, EmptyState, OriginBadge, StatusBadge } from '../components/ui';
 import { MedicalReviewDrawer } from '../components/MedicalReviewDrawer';
 import type { HealthStatus } from '../components/ui';
@@ -474,6 +475,22 @@ export function DashboardPage() {
   const [demoLoading, setDemoLoading] = useState(false);
   const [demoError, setDemoError] = useState<string | null>(null);
   const [demoReadyMsg, setDemoReadyMsg] = useState<string | null>(null);
+  const [downloadMsg, setDownloadMsg] = useState<string | null>(null);
+
+  function onDownloadExampleXlsx() {
+    setDemoError(null);
+    const workbook = buildSyntheticScenarioXlsx();
+    const blob = new Blob([workbook.content], { type: workbook.mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = workbook.fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+    setDownloadMsg(
+      `Downloaded ${workbook.fileName}. Open "Import data" to upload the workbook and import all sheets into your profile.`,
+    );
+  }
 
   async function onExploreDemo() {
     setDemoLoading(true);
@@ -703,8 +720,31 @@ export function DashboardPage() {
         >
           <div className="space-y-4">
             <p className="text-sm leading-relaxed text-slate-300">
-              Your personal profile (<strong className="text-white">{active?.display_name}</strong>) is currently empty. You can import CSV, XML, or XLSX measurements, complete a daily check-in, or switch to the isolated 90-day Demo Astronaut profile.
+              Your personal profile (<strong className="text-white">{active?.display_name}</strong>) is currently empty. You can download a complete 90-day example Excel workbook (.xlsx) and upload all its sheets in <strong>Import data</strong>, or explore the isolated Demo Astronaut profile.
             </p>
+            {downloadMsg && <Alert kind="info">{downloadMsg}</Alert>}
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={onDownloadExampleXlsx}
+                className="border-purple-400/50 bg-purple-950/60 text-purple-100 hover:bg-purple-900/70"
+              >
+                Download 90-Day Example (.xlsx)
+              </Button>
+              <Link
+                to="/import"
+                className="rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+              >
+                Import data
+              </Link>
+              <Link
+                to="/check-in"
+                className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-200 hover:border-cyan-500/50"
+              >
+                Complete Daily Check-In
+              </Link>
+            </div>
             <div className="rounded-xl border border-violet-500/40 bg-violet-950/35 p-4 space-y-2.5">
               <p className="text-sm font-semibold text-violet-100">Explore with a Demo Astronaut</p>
               <p className="text-sm leading-relaxed text-violet-100/85">
@@ -721,18 +761,6 @@ export function DashboardPage() {
                 >
                   {demoLoading ? 'Loading 90-Day Demo…' : 'Explore 90-Day Demo'}
                 </Button>
-                <Link
-                  to="/import"
-                  className="rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
-                >
-                  Import data
-                </Link>
-                <Link
-                  to="/check-in"
-                  className="rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-200 hover:border-cyan-500/50"
-                >
-                  Complete Daily Check-In
-                </Link>
               </div>
             </div>
           </div>

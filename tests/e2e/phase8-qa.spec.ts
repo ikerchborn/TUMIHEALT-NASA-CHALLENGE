@@ -356,3 +356,35 @@ test('Explore 90-Day Demo loads complete scenario in isolated Demo Mode and Exce
   await page.getByRole('button', { name: 'Explore 90-Day Demo' }).click();
   await expect(page.getByTestId('observation-detail-card').first()).toBeVisible();
 });
+
+test('Personal astronaut account can download 90-day .xlsx example and import all measurement sheets at once', async ({
+  page,
+}, testInfo) => {
+  await createPersonalProfile(page);
+  await page.goto('/');
+
+  // Download 90-Day Example (.xlsx) from personal Mission Home
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Download 90-Day Example (.xlsx)' }).click(),
+  ]);
+  const xlsxPath = resolve(testInfo.outputDir, download.suggestedFilename());
+  await download.saveAs(xlsxPath);
+
+  // Personal profile still has 0 indicators until user uploads it
+  await expect(page.getByText('All Indicators (0)')).toBeVisible();
+
+  // Upload the .xlsx on /import and import all 3 measurement sheets at once
+  await page.goto('/import');
+  await page.locator('input[type="file"]').setInputFiles(xlsxPath);
+  const importAllBtn = page.getByRole('button', { name: /Import All Measurement Sheets \(3 sheets\)/i });
+  await expect(importAllBtn).toBeVisible();
+  await importAllBtn.click();
+
+  await expect(page.getByText(/Imported \d+ records across 3 sheets \(Cardiovascular, Sleep, Blood_Labs\)\./)).toBeVisible();
+
+  // Verify personal dashboard now displays the imported indicators & observations
+  await page.goto('/');
+  await expect(page.getByTestId('observation-detail-card').first()).toBeVisible();
+  await expect(page.getByText(/All Indicators \(0\)/)).toHaveCount(0);
+});
