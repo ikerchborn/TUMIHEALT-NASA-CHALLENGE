@@ -456,8 +456,18 @@ export function ImportPage() {
       }
       setOriginalFileName(file.name);
       setSheets(extracted);
-      setSelectedSheetIdx(0);
-      loadSheet(file.name, extracted[0]);
+      const firstMeasurementIdx = extracted.findIndex((s) => {
+        try {
+          const info = inspectCsvFile(s.csvText, `${s.sheetName}.csv`);
+          const set = new Set(info.headers.map((h) => h.trim()));
+          return set.has('timestamp') && set.has('indicator') && set.has('value') && set.has('unit');
+        } catch {
+          return false;
+        }
+      });
+      const initialIdx = firstMeasurementIdx >= 0 ? firstMeasurementIdx : 0;
+      setSelectedSheetIdx(initialIdx);
+      loadSheet(file.name, extracted[initialIdx]);
     } catch (err) {
       setError(formatFileImportError(file.name, err));
     }
@@ -668,37 +678,44 @@ export function ImportPage() {
               })}
             </ul>
           </details>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="ghost" onClick={() => downloadTemplate('csv')}>Download CSV template</Button>
-            <Button variant="ghost" onClick={() => downloadTemplate('xml')}>Download XML template</Button>
-            <Button variant="ghost" onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
-          </div>
-          <div className="mt-4 rounded-xl border border-violet-500/35 bg-violet-950/25 p-3.5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-violet-300">
-              90-Day Synthetic Astronaut Datasets (Import-Ready CSVs · data/synthetic/)
-            </p>
-            <p className="mt-1 text-xs text-slate-300">
-              Download complete 90-day synthetic timelines grounded in NASA OSDR OSD-569 (CBC), OSD-575 (CMP), UTMB Campaign 1 (Sleep), and Apollo AP005 (Cardiovascular) to test multi-indicator import:
-            </p>
-            <div className="mt-2.5 flex flex-wrap gap-2">
-              <Button
-                variant="secondary"
-                onClick={downloadSyntheticScenarioXlsx}
-                className="border-purple-400/50 bg-purple-700 text-white hover:bg-purple-600"
-              >
-                Download Complete 90-Day Scenario (.xlsx)
-              </Button>
-              <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('blood')}>
-                Download 90d Blood CSV (140 rows · 24 CBC/CMP biomarkers)
-              </Button>
-              <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('sleep')}>
-                Download 90d Sleep CSV (135 rows · 3 sleep indicators)
-              </Button>
-              <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('cardiovascular')}>
-                Download 90d Cardiovascular &amp; Vitals CSV (320 rows · 8 indicators)
-              </Button>
+          <details className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs">
+            <summary className="cursor-pointer font-medium text-cyan-300">
+              Download templates &amp; 90-day example formats (.csv, .xml, .xlsx)
+            </summary>
+            <div className="mt-3 space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Button variant="ghost" onClick={() => downloadTemplate('csv')}>Download CSV template</Button>
+                <Button variant="ghost" onClick={() => downloadTemplate('xml')}>Download XML template</Button>
+                <Button variant="ghost" onClick={() => downloadTemplate('xlsx')}>Download XLSX template</Button>
+              </div>
+              <div className="rounded-xl border border-violet-500/35 bg-violet-950/25 p-3.5">
+                <p className="text-xs font-semibold uppercase tracking-wider text-violet-300">
+                  90-Day Synthetic Astronaut Datasets (Import-Ready Formats)
+                </p>
+                <p className="mt-1 text-xs text-slate-300">
+                  Download complete 90-day synthetic timelines grounded in NASA OSDR OSD-569 (CBC), OSD-575 (CMP), UTMB Campaign 1 (Sleep), and Apollo AP005 (Cardiovascular) to test multi-indicator import:
+                </p>
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={downloadSyntheticScenarioXlsx}
+                    className="border-purple-400/50 bg-purple-700 text-white hover:bg-purple-600"
+                  >
+                    Download Complete 90-Day Scenario (.xlsx)
+                  </Button>
+                  <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('blood')}>
+                    Download 90d Blood CSV (140 rows · 24 CBC/CMP biomarkers)
+                  </Button>
+                  <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('sleep')}>
+                    Download 90d Sleep CSV (135 rows · 3 sleep indicators)
+                  </Button>
+                  <Button variant="secondary" onClick={() => downloadSynthetic90dCsv('cardiovascular')}>
+                    Download 90d Cardiovascular &amp; Vitals CSV (320 rows · 8 indicators)
+                  </Button>
+                </div>
+              </div>
             </div>
-          </div>
+          </details>
         </Card>
 
         <Card title="1 · File & Context">

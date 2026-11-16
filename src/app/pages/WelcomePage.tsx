@@ -21,6 +21,7 @@ export interface TeamMemberCardConfig {
   id: string;
   badgeCode: string;
   photo: string;
+  photoClass?: string;
   namePlaceholder: string;
   rolePlaceholder: string;
   contributionPlaceholder: string;
@@ -35,6 +36,7 @@ export const TEAM_MEMBERS: readonly TeamMemberCardConfig[] = [
     id: 'team-member-1',
     badgeCode: 'TM-01',
     photo: '/team/luis-chanduvi.jpg',
+    photoClass: 'object-[28%_60%] scale-125',
     namePlaceholder: 'Luis Chanduvi',
     rolePlaceholder: 'Systems Engineering Coordinator',
     contributionPlaceholder:
@@ -432,11 +434,13 @@ export function WelcomePage() {
                   >
                     <div className="space-y-4">
                       <div className="flex items-center gap-3.5">
-                        <img
-                          src={member.photo}
-                          alt={member.namePlaceholder}
-                          className="h-14 w-14 shrink-0 rounded-2xl border border-cyan-500/35 object-cover object-top shadow-inner"
-                        />
+                        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl border border-cyan-500/35 shadow-inner">
+                          <img
+                            src={member.photo}
+                            alt={member.namePlaceholder}
+                            className={`h-full w-full object-cover ${member.photoClass ?? 'object-top'}`}
+                          />
+                        </div>
                         <div className="min-w-0">
                           <span className="inline-block rounded-md border border-slate-700 bg-slate-950/90 px-2 py-0.5 font-mono text-[11px] font-medium text-cyan-300">
                             {member.focusTag}

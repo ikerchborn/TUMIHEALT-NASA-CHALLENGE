@@ -374,9 +374,12 @@ test('Personal astronaut account can download 90-day .xlsx example and import al
   // Personal profile still has 0 indicators until user uploads it
   await expect(page.getByText('All Indicators (0)')).toBeVisible();
 
-  // Upload the .xlsx on /import and import all 3 measurement sheets at once
+  // Upload the .xlsx on /import: auto-selects first measurement sheet (not README) and validates cleanly
   await page.goto('/import');
   await page.locator('input[type="file"]').setInputFiles(xlsxPath);
+  await page.getByRole('button', { name: 'Validate & Preview' }).click();
+  await expect(page.getByText(/Invalid:\s*0/)).toBeVisible();
+
   const importAllBtn = page.getByRole('button', { name: /Import All Measurement Sheets \(3 sheets\)/i });
   await expect(importAllBtn).toBeVisible();
   await importAllBtn.click();
